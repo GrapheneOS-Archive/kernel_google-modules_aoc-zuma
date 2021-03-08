@@ -65,6 +65,10 @@
 #define AOC_MAX_MINOR (1U)
 #define AOC_MBOX_CHANNELS 16
 
+#define AOC_FWDATA_ENTRIES 10
+#define AOC_FWDATA_BOARDID_DFL  0x20202
+#define AOC_FWDATA_BOARDREV_DFL 0x10000
+
 static struct platform_device *aoc_platform_device;
 static bool aoc_online;
 
@@ -72,7 +76,7 @@ struct aoc_prvdata {
 	struct mbox_client mbox_client;
 	struct work_struct online_work;
 	struct resource dram_resource;
-	struct ion_heap *sensor_heap;
+	struct dma_heap *sensor_heap;
 	aoc_map_handler map_handler;
 	void *map_handler_ctx;
 
@@ -458,12 +462,85 @@ static void aoc_pass_fw_information(void *base, const struct aoc_fw_data *fwd,
 	}
 }
 
+static u32 aoc_board_config_parse(struct device_node *node, u32 *board_id, u32 *board_rev)
+{
+	const char *board_cfg;
+	int err = 0;
+
+	/* Read board config from device tree */
+	err = of_property_read_string(node, "aoc-board-cfg", &board_cfg);
+
+	if (err < 0) {
+		pr_err("Unable to retrieve AoC board configuration, check DT");
+		pr_info("Assuming R4/O6 board configuration");
+		*board_id  = AOC_FWDATA_BOARDID_DFL;
+		*board_rev = AOC_FWDATA_BOARDREV_DFL;
+	} else {
+		if (strncmp(board_cfg, "sl1", 3) == 0) {
+			*board_id  = 0x201;
+			*board_rev = 0x100;
+			pr_info("AoC Platform: SL1");
+		} else if (strncmp(board_cfg, "sl2", 3) == 0) {
+			*board_id  = 0x201;
+			*board_rev = 0x101;
+			pr_info("AoC Platform: SL2");
+		} else if (strncmp(board_cfg, "wf1", 3) == 0) {
+			*board_id  = 0x201;
+			*board_rev = 0x200;
+			pr_info("AoC Platform: WF1");
+		} else if (strncmp(board_cfg, "wf2v2", 5) == 0) {
+			*board_id  = 0x201;
+			*board_rev = 0x202;
+			pr_info("AoC Platform: WF2 (v2)");
+		} else if (strncmp(board_cfg, "wf2", 3) == 0) {
+			*board_id  = 0x201;
+			*board_rev = 0x201;
+			pr_info("AoC Platform: WF2 (v1)");
+		} else if (strncmp(board_cfg, "r4", 2) == 0) {
+			*board_id  = 0x20202;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: R4");
+		} else if (strncmp(board_cfg, "o6", 2) == 0) {
+			*board_id  = 0x20302;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: O6");
+		} else if (strncmp(board_cfg, "p7", 2) == 0) {
+			*board_id  = 0x20401;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: P7");
+		} else if (strncmp(board_cfg, "b3", 2) == 0) {
+			*board_id  = 0x20501;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: B3");
+		} else if (strncmp(board_cfg, "r7", 2) == 0) {
+			*board_id  = 0x20601;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: R7");
+		} else if (strncmp(board_cfg, "c6", 2) == 0) {
+			*board_id  = 0x20801;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: C6");
+		} else if (strncmp(board_cfg, "t6", 2) == 0) {
+			*board_id  = 0x20901;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: T6");
+		} else {
+			pr_err("Unable to identify AoC board configuration, check DT");
+			pr_info("Assuming R4/O6 board configuration");
+
+			// Assume R4/O6, as this is the most likely to work
+			*board_id  = AOC_FWDATA_BOARDID_DFL;
+			*board_rev = AOC_FWDATA_BOARDREV_DFL;
+		}
+	}
+
+	return err;
+}
+
 static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 {
 	struct device *dev = ctx;
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
-	u32 board_id = dt_property(prvdata->dev->of_node, "board_id");
-	u32 board_rev = dt_property(prvdata->dev->of_node, "board_rev");
 	u32 sram_was_repaired = aoc_sram_was_repaired(prvdata);
 	u32 carveout_base = prvdata->dram_resource.start;
 	u32 carveout_size = prvdata->dram_size;
@@ -471,6 +548,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_vnom = ((dt_force_vnom != 0) || (prvdata->force_voltage_nominal != 0)) ? 1 : 0;
 	u32 disable_mm = prvdata->disable_monitor_mode;
 	u32 enable_uart = prvdata->enable_uart_tx;
+	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
+	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
+	unsigned int i;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -485,7 +565,17 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCEnableUART, .value = enable_uart }
 	};
 	const char *version;
+	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset, bootloader_offset;
+
+	aoc_board_config_parse(prvdata->dev->of_node, &board_id, &board_rev);
+
+	for (i = 0; i < fw_data_entries; i++) {
+		if (fw_data[i].key == kAOCBoardID)
+			fw_data[i].value = board_id;
+		else if (fw_data[i].key == kAOCBoardRevision)
+			fw_data[i].value = board_rev;
+	}
 
 	aoc_req_assert(prvdata, true);
 
@@ -1191,8 +1281,8 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 		struct aoc_ipc_service_header *hdr =
 			(struct aoc_ipc_service_header *)s;
 
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%d : name %s\n",
-				 i, aoc_service_name(s));
+		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%d : name %s channel %d\n",
+				 i, aoc_service_name(s), aoc_service_irq_index(s));
 		if (hdr->regions[0].slots > 0) {
 			ret += scnprintf(
 				buf + ret, PAGE_SIZE - ret,
@@ -1689,11 +1779,11 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev)
 }
 EXPORT_SYMBOL(aoc_remove_map_handler);
 
-static void aoc_pheap_alloc_cb(struct ion_buffer *buffer, void *ctx)
+static void aoc_pheap_alloc_cb(struct samsung_dma_buffer *buffer, void *ctx)
 {
 	struct device *dev = ctx;
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
-	struct sg_table *sg = buffer->sg_table;
+	struct sg_table *sg = &buffer->sg_table;
 	phys_addr_t phys;
 	size_t size;
 
@@ -1708,16 +1798,16 @@ static void aoc_pheap_alloc_cb(struct ion_buffer *buffer, void *ctx)
 	size = sg->sgl[0].length;
 
 	if (prvdata->map_handler) {
-		prvdata->map_handler((u64)buffer->priv_virt, phys, size, true,
+		prvdata->map_handler((u64)buffer->priv, phys, size, true,
 				     prvdata->map_handler_ctx);
 	}
 }
 
-static void aoc_pheap_free_cb(struct ion_buffer *buffer, void *ctx)
+static void aoc_pheap_free_cb(struct samsung_dma_buffer *buffer, void *ctx)
 {
 	struct device *dev = ctx;
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
-	struct sg_table *sg = buffer->sg_table;
+	struct sg_table *sg = &buffer->sg_table;
 	phys_addr_t phys;
 	size_t size;
 
@@ -1732,7 +1822,7 @@ static void aoc_pheap_free_cb(struct ion_buffer *buffer, void *ctx)
 	size = sg->sgl[0].length;
 
 	if (prvdata->map_handler) {
-		prvdata->map_handler((u64)buffer->priv_virt, phys, size, false,
+		prvdata->map_handler((u64)buffer->priv, phys, size, false,
 				     prvdata->map_handler_ctx);
 	}
 }
@@ -1882,22 +1972,17 @@ static bool aoc_create_ion_heap(struct aoc_prvdata *prvdata)
 {
 	phys_addr_t base = prvdata->dram_resource.start + (28 * SZ_1M);
 	struct device *dev = prvdata->dev;
-	struct ion_heap *heap;
 	size_t size = SZ_4M;
 	size_t align = SZ_16K;
 	const char *name = "sensor_direct_heap";
+	struct dma_heap *heap;
 
-	heap = ion_physical_heap_create(base, size, align, name);
-	if (IS_ERR(heap)) {
-		dev_err(dev, "ION heap failure: %ld\n", PTR_ERR(heap));
-	} else {
+	heap = ion_physical_heap_create(base, size, align, name, aoc_pheap_alloc_cb,
+					aoc_pheap_free_cb, dev);
+	if (IS_ERR(heap))
+		dev_err(dev, "heap creation failure: %ld\n", PTR_ERR(heap));
+	else
 		prvdata->sensor_heap = heap;
-
-		ion_physical_heap_set_allocate_callback(heap, aoc_pheap_alloc_cb, dev);
-		ion_physical_heap_set_free_callback(heap, aoc_pheap_free_cb, dev);
-
-		ion_device_add_heap(heap);
-	}
 
 	return !IS_ERR(heap);
 }
@@ -1914,10 +1999,9 @@ static int aoc_open(struct inode *inode, struct file *file)
 static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct dma_buf *dmabuf;
-	struct ion_buffer *ionbuf;
-	long ret = -EFAULT;
-
 	struct aoc_prvdata *prvdata = file->private_data;
+	struct samsung_dma_buffer *dma_heap_buf;
+	long ret = -EINVAL;
 
 	switch (cmd) {
 	case AOC_IOCTL_ION_FD_TO_HANDLE:
@@ -1937,8 +2021,8 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 			break;
 		}
 
-		ionbuf = dmabuf->priv;
-		handle.handle = (u64)ionbuf->priv_virt;
+		dma_heap_buf = dmabuf->priv;
+		handle.handle = (u64)dma_heap_buf->priv;
 
 		dma_buf_put(dmabuf);
 
@@ -2300,7 +2384,11 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	aoc_configure_sysmmu(prvdata);
 
-	aoc_create_ion_heap(prvdata);
+	if (!aoc_create_ion_heap(prvdata)) {
+		pr_err("Unable to create heap\n");
+		aoc_cleanup_resources(pdev);
+		return -ENOMEM;
+	}
 #endif
 
 	/* Default to 6MB if we are not loading the firmware (i.e. trace32) */

@@ -47,6 +47,7 @@
 
 #define PCM_TIMER_INTERVAL_NANOSECS 10e6
 #define COMPR_OFFLOAD_TIMER_INTERVAL_NANOSECS 5000e6
+#define DEFAULT_PCM_WAIT_TIME_IN_MSECS 10000
 
 /* Default mic and sink for audio capturing/playback */
 #define DEFAULT_MICPHONE_ID 0
@@ -57,7 +58,7 @@
 #define N_MIC_IN_SPATIAL_MODULE 3
 
 /* TODO: the exact number has to be determined based on hardware platform*/
-#define MAX_NUM_OF_SUBSTREAMS 12
+#define MAX_NUM_OF_SUBSTREAMS 32
 #define MAX_NUM_OF_SINKS 5
 #define AVAIL_SUBSTREAMS_MASK 0x0fff
 
@@ -159,6 +160,7 @@ struct aoc_chip {
 	unsigned int opened;
 	struct mutex audio_mutex;
 	spinlock_t audio_lock;
+	long pcm_wait_time_in_ms;
 
 	struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG a2dp_encoder_cfg;
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG usb_sink_cfg;
