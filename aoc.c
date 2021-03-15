@@ -43,6 +43,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <soc/google/acpm_ipc_ctrl.h>
+#include <soc/google/exynos-cpupm.h>
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
 #include <soc/google/exynos-itmon.h>
@@ -59,8 +60,6 @@
 
 #define MAX_FIRMWARE_LENGTH 128
 #define AOC_S2MPU_CTRL0 0x0
-#define AOC_PCU_RESET_CONTROL 0x0
-#define AOC_PCU_RESET_CONTROL_RESET_VALUE 0x0
 
 #define AOC_MAX_MINOR (1U)
 #define AOC_MBOX_CHANNELS 16
@@ -386,7 +385,6 @@ static void aoc_mbox_rx_callback(struct mbox_client *cl, void *mssg)
 
 	/* Transitioning from offline to online */
 	if (aoc_online == false && aoc_is_online()) {
-		aoc_online = true;
 		schedule_work(&prvdata->online_work);
 	} else {
 		aoc_process_services(prvdata);
@@ -404,6 +402,20 @@ static void aoc_mbox_tx_done(struct mbox_client *cl, void *mssg, int r)
 static void aoc_req_assert(struct aoc_prvdata *p, bool assert)
 {
 	iowrite32(!!assert, p->aoc_req_virt);
+}
+
+static int aoc_req_wait(struct aoc_prvdata *p, bool assert)
+{
+	unsigned long aoc_req_timeout;
+
+	aoc_req_timeout = jiffies + (2 * HZ);
+	while (time_before(jiffies, aoc_req_timeout)) {
+		if (!!readl(p->aoc_req_virt + 0x40) == !!assert)
+			return 0;
+		msleep(100);
+	}
+
+	return -ETIMEDOUT;
 }
 
 extern int gs_chipid_get_ap_hw_tune_array(const u8 **array);
@@ -629,9 +641,14 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
 
-	aoc_a32_reset();
-
+	dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
+	disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
 	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
+	aoc_a32_reset();
+	msleep(2000);
+	dev_info(dev, "re-enabling SICD\n");
+	enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
+
 free_fw:
 	release_firmware(fw);
 }
@@ -1097,7 +1114,7 @@ static bool aoc_fpga_reset(struct aoc_prvdata *prvdata)
 static bool aoc_a32_reset(void)
 {
 	u32 pcu_value;
-	u32 *pcu = aoc_sram_translate(AOC_PCU_BASE);
+	void __iomem *pcu = aoc_sram_translate(AOC_PCU_BASE);
 
 	if (!pcu)
 		return false;
@@ -1113,9 +1130,34 @@ static bool aoc_a32_reset(void)
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 {
 	struct device *dev = prvdata->dev;
+	/* 4100 * 0.244 us * 100 = 100 ms */
+	const int aoc_watchdog_value_ssr = 4100 * 100;
 	const int aoc_reset_timeout_ms = 1000;
+	const u32 aoc_watchdog_control_ssr = 0x2F;
 	int rc, i;
-	u32 *pcu;
+	void __iomem *pcu;
+
+	pcu = aoc_sram_translate(AOC_PCU_BASE);
+	if (!pcu)
+		return -ENODEV;
+
+	dev_info(prvdata->dev, "asserting aoc_req\n");
+	aoc_req_assert(prvdata, true);
+	rc = aoc_req_wait(prvdata, true);
+	if (rc) {
+		dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+		return rc;
+	}
+
+	dev_info(prvdata->dev, "resetting aoc\n");
+	writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
+	if ((readl(pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET) &
+			AOC_PCU_WATCHDOG_CONTROL_KEY_ENABLED_MASK) == 0) {
+		dev_err(prvdata->dev, "unlock aoc watchdog failed\n");
+		return -EINVAL;
+	}
+	writel(aoc_watchdog_value_ssr, pcu + AOC_PCU_WATCHDOG_VALUE_OFFSET);
+	writel(aoc_watchdog_control_ssr, pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET);
 
 	dev_info(prvdata->dev, "waiting for aoc reset to finish\n");
 	if (wait_event_timeout(prvdata->aoc_reset_wait_queue, prvdata->aoc_reset_done,
@@ -1126,11 +1168,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	dev_info(prvdata->dev, "aoc reset finished\n");
 	prvdata->aoc_reset_done = false;
 
-	pcu = aoc_sram_translate(AOC_PCU_BASE);
-	if (!pcu)
-		return -ENODEV;
-
-	if (readl(pcu + AOC_PCU_RESET_CONTROL) != AOC_PCU_RESET_CONTROL_RESET_VALUE) {
+	if (readl(pcu + AOC_PCU_RESET_CONTROL_OFFSET) != AOC_PCU_RESET_CONTROL_RESET_VALUE) {
 		dev_err(prvdata->dev, "aoc watchdog reset failed\n");
 		return -ENODEV;
 	}
@@ -1682,6 +1720,9 @@ static void aoc_did_become_online(struct work_struct *work)
 	struct device *dev = prvdata->dev;
 	int i, s;
 
+	if (aoc_online)
+		return;
+
 	s = aoc_num_services();
 
 	aoc_req_assert(prvdata, false);
@@ -1714,6 +1755,8 @@ static void aoc_did_become_online(struct work_struct *work)
 
 		register_service_device(i, prvdata->dev);
 	}
+
+	aoc_online = true;
 }
 
 static void aoc_take_offline(struct aoc_prvdata *prvdata)
@@ -1834,7 +1877,6 @@ static irqreturn_t aoc_int_handler(int irq, void *dev)
 
 	/* Transitioning from offline to online */
 	if (aoc_online == false && aoc_is_online()) {
-		aoc_online = true;
 		schedule_work(&aoc_online_work);
 	} else {
 		aoc_process_services(dev_get_drvdata(dev));

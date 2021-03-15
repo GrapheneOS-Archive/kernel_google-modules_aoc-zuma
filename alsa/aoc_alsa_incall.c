@@ -16,37 +16,6 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 
-/* Timer interrupt to read the ring buffer reader/writer positions */
-void aoc_timer_start(struct aoc_alsa_stream *alsa_stream)
-{
-	ktime_t interval = ktime_set(0, alsa_stream->timer_interval_ns);
-	hrtimer_start(&(alsa_stream->hr_timer), interval, HRTIMER_MODE_REL);
-}
-
-void aoc_timer_restart(struct aoc_alsa_stream *alsa_stream)
-{
-	ktime_t currtime;
-	ktime_t interval = ktime_set(0, alsa_stream->timer_interval_ns);
-	currtime = ktime_get();
-	hrtimer_forward(&(alsa_stream->hr_timer), currtime, interval);
-}
-
-void aoc_timer_stop(struct aoc_alsa_stream *alsa_stream)
-{
-	int ret;
-	ret = hrtimer_cancel(&(alsa_stream->hr_timer));
-	if (ret)
-		pr_notice("The hr_timer was still in use...\n");
-}
-
-void aoc_timer_stop_sync(struct aoc_alsa_stream *alsa_stream)
-{
-	int ret;
-	ret = hrtimer_cancel(&(alsa_stream->hr_timer));
-	if (ret)
-		pr_notice("The hr_timer was still in use...\n");
-}
-
 /* Hardware definition
  * TODO: different pcm may have different hardware setup,
  * considering deep buffer and compressed offload buffer
@@ -94,7 +63,8 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 				  aoc_ring_bytes_read(dev->service, AOC_DOWN) :
 				  aoc_ring_bytes_written(dev->service, AOC_UP));
 
-	pr_debug("consumed = %ld , hw_ptr_base =%ld\n", consumed, alsa_stream->hw_ptr_base);
+	dev_dbg(&(dev->dev), "consumed = %ld , hw_ptr_base =%ld\n", consumed,
+		alsa_stream->hw_ptr_base);
 
 	/* TODO: To do more on no pointer update? */
 	if (consumed == alsa_stream->prev_consumed)
@@ -103,8 +73,8 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 	/* To deal with overlfow in Tx or Rx in int32_t */
 	if (consumed < alsa_stream->prev_consumed) {
 		alsa_stream->n_overflow++;
-		pr_notice("overflow in Tx/Rx: %ld - %ld - %d times\n", consumed,
-			  alsa_stream->prev_consumed, alsa_stream->n_overflow);
+		dev_notice(&(dev->dev), "overflow in Tx/Rx: %ld - %ld - %d times\n", consumed,
+			   alsa_stream->prev_consumed, alsa_stream->n_overflow);
 	}
 	alsa_stream->prev_consumed = consumed;
 
@@ -125,7 +95,6 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 static void snd_aoc_pcm_free(struct snd_pcm_runtime *runtime)
 {
 	pr_debug("Freeing up alsa stream here ..\n");
-	pr_debug("%s:", __func__);
 
 	kfree(runtime->private_data);
 	runtime->private_data = NULL;
@@ -145,27 +114,29 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	int idx;
 	int err;
 
-	pr_debug("stream (%d)\n", substream->number); /* Playback or capture */
+	dev_dbg(component->dev, "stream (%d)\n", substream->number); /* Playback or capture */
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
-		pr_err("ERR: interrupted whilst waiting for lock\n");
+		dev_err(component->dev, "ERR: interrupted whilst waiting for lock\n");
 		return -EINTR;
 	}
 
 	idx = substream->pcm->device;
-	pr_debug("pcm device open (%d)\n", idx);
-	pr_debug("chip open (%d)\n", chip->opened);
+	dev_dbg(component->dev, "pcm device open (%d)\n", idx);
+	dev_dbg(component->dev, "chip open (%d)\n", chip->opened);
 
 	/* Find the corresponding aoc audio service */
 	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev);
 	if (err < 0) {
-		pr_err("ERR:%d fail to alloc service for %s", err, rtd->dai_link->name);
+		dev_err(component->dev, "ERR:%d fail to alloc service for %s", err,
+			rtd->dai_link->name);
 		goto out;
 	}
 
 	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
 	if (alsa_stream == NULL) {
 		err = -ENOMEM;
-		pr_err("ERR: fail to alloc alsa_stream for %s", rtd->dai_link->name);
+		dev_err(component->dev, "ERR: fail to alloc alsa_stream for %s",
+			rtd->dai_link->name);
 		goto out;
 	}
 
@@ -185,7 +156,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	err = aoc_audio_open(alsa_stream);
 	if (err != 0) {
-		pr_err("ERR: fail to audio open for %s", rtd->dai_link->name);
+		dev_err(component->dev, "ERR: fail to audio open for %s", rtd->dai_link->name);
 		goto out;
 	}
 	runtime->private_data = alsa_stream;
@@ -213,7 +184,7 @@ out:
 	}
 	mutex_unlock(&chip->audio_mutex);
 
-	pr_debug("pcm open err=%d\n", err);
+	dev_dbg(component->dev, "pcm open err=%d\n", err);
 	return err;
 }
 
@@ -227,28 +198,28 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 	struct aoc_chip *chip = alsa_stream->chip;
 	int err;
 
-	pr_debug("%s: name %s substream %p", __func__, rtd->dai_link->name, substream);
+	dev_dbg(component->dev, "name %s substream %pK", rtd->dai_link->name, substream);
 	aoc_timer_stop_sync(alsa_stream);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
-		pr_err("ERR: interrupted while waiting for lock\n");
+		dev_err(component->dev, "ERR: interrupted while waiting for lock\n");
 		return -EINTR;
 	}
 
 	runtime = substream->runtime;
 	alsa_stream = runtime->private_data;
 
-	pr_debug("alsa pcm close\n");
+	dev_dbg(component->dev, "alsa pcm close\n");
 	free_aoc_audio_service(rtd->dai_link->name, alsa_stream->dev);
 	/*
 	* Call stop if it's still running. This happens when app
 	* is force killed and we don't get a stop trigger.
 	*/
 	if (alsa_stream->running) {
-		err = aoc_audio_stop(alsa_stream);
+		err = aoc_audio_incall_stop(alsa_stream);
 		alsa_stream->running = 0;
 		if (err != 0)
-			pr_err("ERR: fail to stop alsa stream\n");
+			dev_err(component->dev, "ERR: fail to stop alsa stream\n");
 	}
 
 	alsa_stream->period_size = 0;
@@ -283,7 +254,7 @@ static int snd_aoc_pcm_hw_params(struct snd_soc_component *component,
 
 	err = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
 	if (err < 0) {
-		pr_err("ERR:%d fail in pcm buffer allocation\n", err);
+		dev_err(component->dev, "ERR:%d fail in pcm buffer allocation\n", err);
 		return err;
 	}
 
@@ -295,7 +266,8 @@ static int snd_aoc_pcm_hw_params(struct snd_soc_component *component,
 
 	alsa_stream->pcm_float_fmt = (params_format(params) == SNDRV_PCM_FORMAT_FLOAT_LE);
 
-	pr_debug("alsa_stream->pcm_format_width = %d\n", alsa_stream->pcm_format_width);
+	dev_dbg(component->dev, "alsa_stream->pcm_format_width = %d\n",
+		alsa_stream->pcm_format_width);
 	return err;
 }
 
@@ -314,7 +286,7 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
 	struct aoc_service_dev *dev = alsa_stream->dev;
 	struct aoc_chip *chip = alsa_stream->chip;
-	int channels, source_mode, err;
+	int channels;
 
 	aoc_timer_stop_sync(alsa_stream);
 
@@ -323,35 +295,9 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 
 	channels = alsa_stream->channels;
 
-	/* source_mode only used by playback */
-	if (alsa_stream->entry_point_idx == HAPTICS) {
-		source_mode = HAPTICS_MODE;
-	} else if (alsa_stream->cstream)
-		source_mode = OFFLOAD_MODE;
-	else
-		source_mode = PLAYBACK_MODE;
-
-	/* Reset the writer pointer of the DRAM buffer */
-	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		if (!aoc_ring_reset_write_pointer(alsa_stream->dev->service, AOC_DOWN)) {
-			err = -EIO;
-			pr_err("ERR in resetting the DRAM ring buffer writer pointer\n");
-			goto out;
-		}
-	}
-
-	/* Set the audio formats and flush the DRAM buffer */
-	err = aoc_audio_set_params(alsa_stream, channels, alsa_stream->params_rate,
-				   alsa_stream->pcm_format_width, alsa_stream->pcm_float_fmt,
-				   source_mode);
-	if (err < 0) {
-		pr_err("ERR:%d in setting pcm hw params\n", err);
-		goto out;
-	}
-
-	pr_debug("channels = %d, rate = %d, bits = %d, float-fmt = %d\n", channels,
-		 alsa_stream->params_rate, alsa_stream->pcm_format_width,
-		 alsa_stream->pcm_float_fmt);
+	dev_dbg(component->dev, "channels = %d, rate = %d, bits = %d, float-fmt = %d\n", channels,
+		alsa_stream->params_rate, alsa_stream->pcm_format_width,
+		alsa_stream->pcm_float_fmt);
 
 	aoc_audio_setup(alsa_stream);
 
@@ -366,14 +312,14 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 	alsa_stream->prev_consumed = alsa_stream->hw_ptr_base;
 	alsa_stream->n_overflow = 0;
 
-	pr_debug("pcm prepare: hw_ptr_base = %lu\n", alsa_stream->hw_ptr_base);
+	dev_dbg(component->dev, "pcm prepare: hw_ptr_base = %lu\n", alsa_stream->hw_ptr_base);
 
-	pr_debug("buffer_size=%d, period_size=%d pos=%d frame_bits=%d\n", alsa_stream->buffer_size,
-		 alsa_stream->period_size, alsa_stream->pos, runtime->frame_bits);
+	dev_dbg(component->dev, "buffer_size=%d, period_size=%d pos=%d frame_bits=%d\n",
+		alsa_stream->buffer_size, alsa_stream->period_size, alsa_stream->pos,
+		runtime->frame_bits);
 
-out:
 	mutex_unlock(&chip->audio_mutex);
-	return err;
+	return 0;
 }
 
 /* Trigger callback */
@@ -386,35 +332,36 @@ static int snd_aoc_pcm_trigger(struct snd_soc_component *component,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		pr_debug("aoc_AUDIO_TRIGGER_START running=%d\n", alsa_stream->running);
+		dev_dbg(component->dev, "aoc_AUDIO_TRIGGER_START running=%d\n",
+			alsa_stream->running);
 		if (!alsa_stream->running) {
 			/* start timer first to avoid underrun/overrun */
 			aoc_timer_start(alsa_stream);
 
-			err = aoc_audio_start(alsa_stream);
+			err = aoc_audio_incall_start(alsa_stream);
 			if (err == 0) {
 				alsa_stream->running = 1;
 				alsa_stream->draining = 1;
 			} else {
-				pr_err("ERR:%d fail to START stream\n", err);
+				dev_err(component->dev, "ERR:%d fail to START stream\n", err);
 			}
 		}
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
-		pr_debug("aoc_AUDIO_TRIGGER_STOP running=%d draining=%d\n", alsa_stream->running,
-			 runtime->status->state == SNDRV_PCM_STATE_DRAINING);
+		dev_dbg(component->dev, "aoc_AUDIO_TRIGGER_STOP running=%d draining=%d\n",
+			alsa_stream->running, runtime->status->state == SNDRV_PCM_STATE_DRAINING);
 
 		if (runtime->status->state == SNDRV_PCM_STATE_DRAINING) {
-			pr_debug("DRAINING\n");
+			dev_dbg(component->dev, "DRAINING\n");
 			alsa_stream->draining = 1;
 		} else {
-			pr_debug("DROPPING\n");
+			dev_dbg(component->dev, "DROPPING\n");
 			alsa_stream->draining = 0;
 		}
 		if (alsa_stream->running) {
-			err = aoc_audio_stop(alsa_stream);
+			err = aoc_audio_incall_stop(alsa_stream);
 			if (err != 0)
-				pr_err("ERR:%d fail to STOP stream\n", err);
+				dev_err(component->dev, "ERR:%d fail to STOP stream\n", err);
 			alsa_stream->running = 0;
 		}
 		break;
@@ -426,7 +373,8 @@ static int snd_aoc_pcm_trigger(struct snd_soc_component *component,
 }
 
 /* Copy data from user space to hardware buffer  */
-static int snd_aoc_pcm_playback_copy_user(struct snd_pcm_substream *substream, int channel,
+static int snd_aoc_pcm_playback_copy_user(struct snd_soc_component *component,
+					  struct snd_pcm_substream *substream, int channel,
 					  unsigned long pos, void __user *buf, unsigned long count)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -435,13 +383,14 @@ static int snd_aoc_pcm_playback_copy_user(struct snd_pcm_substream *substream, i
 
 	err = aoc_audio_write(alsa_stream, buf, count);
 	if (err)
-		pr_err("ERR:%d fail to send audio to aoc\n", err);
+		dev_err(component->dev, "ERR:%d fail to send audio to aoc\n", err);
 
 	return err;
 }
 
 /* Copy data from hardware buffer to user space */
-static int snd_aoc_pcm_capture_copy_user(struct snd_pcm_substream *substream, int channel,
+static int snd_aoc_pcm_capture_copy_user(struct snd_soc_component *component,
+					 struct snd_pcm_substream *substream, int channel,
 					 unsigned long pos, void __user *buf, unsigned long count)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -450,7 +399,7 @@ static int snd_aoc_pcm_capture_copy_user(struct snd_pcm_substream *substream, in
 
 	err = aoc_audio_read(alsa_stream, buf, count);
 	if (err)
-		pr_err("ERR:%d fail to get audio from aoc\n", err);
+		dev_err(component->dev, "ERR:%d fail to get audio from aoc\n", err);
 
 	return err;
 }
@@ -461,9 +410,11 @@ static int snd_aoc_pcm_copy_user(struct snd_soc_component *component,
 				 unsigned long pos, void __user *buf, unsigned long count)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		return snd_aoc_pcm_playback_copy_user(substream, channel, pos, buf, count);
+		return snd_aoc_pcm_playback_copy_user(component, substream, channel, pos, buf,
+						      count);
 	} else { /* Capture */
-		return snd_aoc_pcm_capture_copy_user(substream, channel, pos, buf, count);
+		return snd_aoc_pcm_capture_copy_user(component, substream, channel, pos, buf,
+						     count);
 	}
 }
 
@@ -475,76 +426,15 @@ static snd_pcm_uframes_t snd_aoc_pcm_pointer(struct snd_soc_component *component
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
 	int pointer;
 
-	pr_debug("pcm_pointer... (%d) hwptr=%ld appl=%ld pos=%d\n", 0,
-		 frames_to_bytes(runtime, runtime->status->hw_ptr),
-		 frames_to_bytes(runtime, runtime->control->appl_ptr), alsa_stream->pos);
+	dev_dbg(component->dev, "pcm_pointer... (%d) hwptr=%ld appl=%ld pos=%d\n", 0,
+		frames_to_bytes(runtime, runtime->status->hw_ptr),
+		frames_to_bytes(runtime, runtime->control->appl_ptr), alsa_stream->pos);
 
 	pointer = bytes_to_frames(substream->runtime, alsa_stream->pos);
 
-	pr_debug("pcm pointer  = %d\n", pointer);
+	dev_dbg(component->dev, "pcm pointer  = %d\n", pointer);
+
 	return pointer;
-}
-
-static int snd_aoc_pcm_mmap(struct snd_soc_component *component,
-			    struct snd_pcm_substream *substream, struct vm_area_struct *vma)
-{
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
-	size_t ring_size;
-	int err;
-
-	phys_addr_t aoc_ring_base =
-		aoc_service_ring_base_phys_addr(alsa_stream->dev, AOC_DOWN, &ring_size);
-
-	alsa_stream->vma = vma;
-
-	err = remap_pfn_range(vma, vma->vm_start, aoc_ring_base >> PAGE_SHIFT,
-			      vma->vm_end - vma->vm_start, pgprot_writecombine(vma->vm_page_prot));
-
-	pr_debug("mmap ring base physical addr: %pa, size = %zu, vm_start=%lx:%lu\n",
-		 &aoc_ring_base, ring_size, vma->vm_start, vma->vm_end - vma->vm_start);
-
-	return err;
-}
-
-static int snd_aoc_pcm_ack(struct snd_pcm_substream *substream)
-{
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
-	struct aoc_service_dev *dev = alsa_stream->dev;
-	unsigned long old_appl_ptr, appl_ptr;
-
-	/* mmap only for ULL. TODO: extend to more entry points */
-	if (alsa_stream->entry_point_idx != ULL)
-		return 0;
-
-	appl_ptr = frames_to_bytes(runtime, runtime->control->appl_ptr);
-
-	/* Update write/read pointer depending on the stream type */
-	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		old_appl_ptr =
-			aoc_ring_bytes_written(dev->service, AOC_DOWN) - alsa_stream->hw_ptr_base;
-
-		pr_debug_ratelimited("ack(): old_ptr=%lu(hw_ptr=%lu), new_ptr=%lu, written:%lu\n",
-				     old_appl_ptr, alsa_stream->hw_ptr_base, appl_ptr,
-				     appl_ptr - old_appl_ptr);
-
-		if (!aoc_service_advance_write_index(dev->service, AOC_DOWN,
-						     appl_ptr - old_appl_ptr))
-			return -EINVAL;
-
-	} else {
-		old_appl_ptr = aoc_ring_bytes_read(dev->service, AOC_UP) - alsa_stream->hw_ptr_base;
-
-		pr_debug_ratelimited("ack(): old_ptr=%lu(hw_ptr=%lu), new_ptr=%lu, written:%lu\n",
-				     old_appl_ptr, alsa_stream->hw_ptr_base, appl_ptr,
-				     appl_ptr - old_appl_ptr);
-
-		if (!aoc_service_advance_read_index(dev->service, AOC_UP, appl_ptr - old_appl_ptr))
-			return -EINVAL;
-	}
-
-	return 0;
 }
 
 static int snd_aoc_pcm_lib_ioctl(struct snd_soc_component *component,
@@ -552,8 +442,8 @@ static int snd_aoc_pcm_lib_ioctl(struct snd_soc_component *component,
 {
 	int err = snd_pcm_lib_ioctl(substream, cmd, arg);
 
-	pr_debug(" .. substream=%p, cmd=%d, arg=%p (%x) err=%d\n", substream, cmd, arg,
-		 arg ? *(unsigned int *)arg : 0, err);
+	dev_dbg(component->dev, " .. substream=%pK, cmd=%d, arg=%pK (%x) err=%d\n", substream, cmd,
+		arg, arg ? *(unsigned int *)arg : 0, err);
 	return err;
 }
 
@@ -577,11 +467,6 @@ static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_r
 					      snd_aoc_playback_hw.buffer_bytes_max);
 	}
 
-	/* For pcm mmap, 5.9 removed ack() in snd_soc_component */
-	if (!rtd->ops.ack) {
-		rtd->ops.ack = snd_aoc_pcm_ack;
-	}
-
 	return 0;
 }
 
@@ -596,7 +481,6 @@ static const struct snd_soc_component_driver aoc_pcm_component = {
 	.prepare = snd_aoc_pcm_prepare,
 	.trigger = snd_aoc_pcm_trigger,
 	.pointer = snd_aoc_pcm_pointer,
-	.mmap = snd_aoc_pcm_mmap,
 	.pcm_construct = aoc_pcm_new,
 };
 
@@ -606,40 +490,38 @@ static int aoc_pcm_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	int err = 0;
 
-	pr_debug("%s", __func__);
 	if (!np)
 		return -EINVAL;
 	err = devm_snd_soc_register_component(dev, &aoc_pcm_component, NULL, 0);
 	if (err) {
-		pr_err("ERR:%d fail to reigster aoc pcm comp\n", err);
+		dev_err(dev, "ERR:%d fail to reigster aoc pcm comp\n", err);
 		return err;
 	}
 
 	return 0;
 }
 
-static const struct of_device_id aoc_pcm_of_match[] = {
+static const struct of_device_id aoc_incall_of_match[] = {
 	{
-		.compatible = "google-aoc-snd-pcm",
+		.compatible = "google-aoc-snd-incall",
 	},
 	{},
 };
-MODULE_DEVICE_TABLE(of, aoc_pcm_of_match);
+MODULE_DEVICE_TABLE(of, aoc_incall_of_match);
 
 static struct platform_driver aoc_pcm_drv = {
     .driver =
         {
-            .name = "google-aoc-snd-pcm",
-            .of_match_table = aoc_pcm_of_match,
+            .name = "google-aoc-snd-incall",
+            .of_match_table = aoc_incall_of_match,
         },
     .probe = aoc_pcm_probe,
 };
 
-int aoc_pcm_init(void)
+int aoc_incall_init(void)
 {
 	int err;
 
-	pr_debug("%s", __func__);
 	err = platform_driver_register(&aoc_pcm_drv);
 	if (err) {
 		pr_err("ERR:%d in registering aoc pcm drv\n", err);
@@ -649,7 +531,7 @@ int aoc_pcm_init(void)
 	return 0;
 }
 
-void aoc_pcm_exit(void)
+void aoc_incall_exit(void)
 {
 	platform_driver_unregister(&aoc_pcm_drv);
 }
