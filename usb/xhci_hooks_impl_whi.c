@@ -85,6 +85,12 @@ static int xhci_setup_done(void)
 	return 0;
 }
 
+static int xhci_sync_conn_stat(u32 conn_state)
+{
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SYNC_CONN_STAT, &conn_state);
+	return 0;
+}
+
 static int xhci_get_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring)
 {
 	struct get_isoc_tr_info_args tr_info;
@@ -198,6 +204,11 @@ static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 			    void *dev)
 {
 	struct usb_device *udev = dev;
+	struct xhci_vendor_data *vendor_data;
+	struct xhci_hcd *xhci;
+
+	xhci = get_xhci_hcd_by_udev(udev);
+	vendor_data = xhci_to_priv(xhci)->vendor_data;
 
 	switch (action) {
 	case USB_DEVICE_ADD:
@@ -205,10 +216,18 @@ static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 			dev_dbg(&udev->dev,
 				 "Compatible with usb audio offload\n");
 			xhci_reset_for_usb_audio_offload(udev);
+			if (vendor_data->op_mode ==
+			    USB_OFFLOAD_SIMPLE_AUDIO_ACCESSORY) {
+				xhci_sync_conn_stat(USB_CONNECTED);
+			}
 		}
 		break;
 	case USB_DEVICE_REMOVE:
-		/* TODO: notify AoC usb audio device removed. */
+		if (is_compatible_with_usb_audio_offload(udev) &&
+		    vendor_data->op_mode ==
+		    USB_OFFLOAD_SIMPLE_AUDIO_ACCESSORY) {
+			xhci_sync_conn_stat(USB_DISCONNECTED);
+		}
 		break;
 	}
 
@@ -331,6 +350,12 @@ xhci_initialize_ring_info_for_remote_isoc(struct xhci_hcd *xhci,
 	xhci_get_isoc_tr_info(0, dir, ring);
 
 	xhci_dbg(xhci, "ring->first_seg->dma=0x%llx\n", ring->first_seg->dma);
+
+	if (ring->first_seg->dma == 0) {
+		kfree(seg);
+		kfree(ring);
+		return NULL;
+	}
 
 	return ring;
 }
