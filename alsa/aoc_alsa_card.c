@@ -1810,8 +1810,18 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	chip->voice_call_audio_enable = 1;
 	chip->mic_spatial_module_enable = 0;
 	chip->sidetone_enable = 0;
+	chip->voip_rx_prepared = 0;
+	chip->voip_tx_prepared = 0;
+	chip->telephony_curr_mic = NULL_PATH;
+	chip->telephony_curr_sink = NULL_PATH;
+	chip->telephony_expect_mic = NULL_PATH;
+	chip->telephony_expect_sink = NULL_PATH;
 
 	chip->pcm_wait_time_in_ms = DEFAULT_PCM_WAIT_TIME_IN_MSECS;
+
+	/* Default values for playback volume and mute */
+	chip->volume = 1000;
+	chip->mute = 1;
 
 	mutex_init(&chip->audio_mutex);
 	spin_lock_init(&chip->audio_lock);

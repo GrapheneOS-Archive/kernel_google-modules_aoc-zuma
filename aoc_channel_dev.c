@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
+#include <uapi/linux/sched/types.h>
 
 #include "aoc.h"
 
@@ -573,7 +574,7 @@ static ssize_t aocc_write(struct file *file, const char __user *buf,
 	}
 
 err_aocc_device_dead:
-	if (retval < 0) {
+	if (retval < 0 && retval != -EAGAIN) {
 		pr_err("Write failed for channel %d with code %zd\n", private->channel_index, retval);
 	}
 
@@ -606,12 +607,17 @@ static unsigned int aocc_poll(struct file *file, poll_table *wait)
 static int aocc_probe(struct aoc_service_dev *dev)
 {
 	int ret;
+	struct sched_param param = {
+		.sched_priority = 10,
+	};
 
 	pr_notice("probe service with name %s\n", dev_name(&dev->dev));
 
 	ret = create_character_device(dev);
 
 	s_demux_task = kthread_run(&aocc_demux_kthread, dev, "aocc_demux");
+
+	sched_setscheduler(s_demux_task, SCHED_FIFO, &param);
 
 	if (IS_ERR(s_demux_task))
 		ret = PTR_ERR(s_demux_task);
