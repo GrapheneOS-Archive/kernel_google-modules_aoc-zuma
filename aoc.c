@@ -1470,17 +1470,10 @@ static struct platform_driver aoc_driver = {
 
 static int aoc_bus_match(struct device *dev, struct device_driver *drv)
 {
-	struct aoc_service_dev *device = AOC_DEVICE(dev);
 	struct aoc_driver *driver = AOC_DRIVER(drv);
-	struct device *aoc = dev->parent;
-	struct aoc_prvdata *prvdata = dev_get_drvdata(aoc);
 
-	aoc_service *s = service_at_index(prvdata, device->service_index);
-	struct aoc_ipc_service_header *header =
-		(struct aoc_ipc_service_header *)s;
 	const char *device_name = dev_name(dev);
 	bool driver_matches_by_name = (driver->service_names != NULL);
-	const char *service_name = header->name;
 
 	pr_debug("bus match dev:%s drv:%s\n", device_name, drv->name);
 
@@ -1490,15 +1483,15 @@ static int aoc_bus_match(struct device *dev, struct device_driver *drv)
 	 * If there is a specific driver matching this service, do not allow a
 	 * generic driver to claim the service
 	 */
-	if (!driver_matches_by_name && has_name_matching_driver(service_name)) {
+	if (!driver_matches_by_name && has_name_matching_driver(device_name)) {
 		pr_debug("ignoring generic driver for service %s\n",
-			 service_name);
+			 device_name);
 		return 0;
 	}
 
 	/* Drivers with a name only match services with that name */
 	if (driver_matches_by_name &&
-	    !driver_matches_service_by_name(drv, (char *)service_name)) {
+	    !driver_matches_service_by_name(drv, (char *)device_name)) {
 		return 0;
 	}
 
@@ -2415,8 +2408,15 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	aoc_platform_device = pdev;
 
 	aoc_sram_virt_mapping = devm_ioremap_resource(dev, aoc_sram_resource);
-	aoc_dram_virt_mapping =
-		devm_ioremap_resource(dev, &prvdata->dram_resource);
+
+	prvdata->dram_size = resource_size(&prvdata->dram_resource);
+	if (!devm_request_mem_region(dev, prvdata->dram_resource.start, prvdata->dram_size, dev_name(dev))) {
+		dev_err(dev, "Failed to claim dram resource %pR\n", &prvdata->dram_resource);
+		rc = -EIO;
+		goto err_sram_dram_map;
+	}
+
+	aoc_dram_virt_mapping = devm_ioremap_wc(dev, prvdata->dram_resource.start, prvdata->dram_size);
 
 	/* Change to devm_platform_ioremap_resource_byname when available */
 	rsrc = platform_get_resource_byname(pdev, IORESOURCE_MEM, "aoc_req");
@@ -2438,7 +2438,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->sram_size = resource_size(aoc_sram_resource);
 
 	prvdata->dram_virt = aoc_dram_virt_mapping;
-	prvdata->dram_size = resource_size(&prvdata->dram_resource);
 
 	if (IS_ERR(aoc_sram_virt_mapping) || IS_ERR(aoc_dram_virt_mapping)) {
 		rc = -ENOMEM;
