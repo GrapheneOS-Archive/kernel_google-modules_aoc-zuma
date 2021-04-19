@@ -6,6 +6,7 @@
  *  Howard.Yen <howardyen@google.com>
  */
 
+#include <linux/dmapool.h>
 #include <linux/dma-mapping.h>
 #include <linux/of.h>
 #include <linux/pm_wakeup.h>
@@ -523,25 +524,47 @@ static void free_transfer_ring(struct xhci_hcd *xhci,
 		struct xhci_virt_device *virt_dev, unsigned int ep_index)
 {
 	struct xhci_vendor_data *vendor_data = xhci_to_priv(xhci)->vendor_data;
-	struct xhci_ring *ring;
+	struct xhci_ring *ring, *new_ring;
 	struct xhci_ep_ctx *ep_ctx;
 	u32 ep_type;
 
 	ring = virt_dev->eps[ep_index].ring;
+	new_ring = virt_dev->eps[ep_index].new_ring;
 	ep_ctx = xhci_get_ep_ctx(xhci, virt_dev->out_ctx, ep_index);
 	ep_type = CTX_TO_EP_TYPE(le32_to_cpu(ep_ctx->ep_info2));
 
-	xhci_dbg(xhci, "ep_index=%u, ep_type=%u, ring type=%u\n", ep_index,
-		 ep_type, ring->type);
+	if (ring) {
+		xhci_dbg(xhci, "ep_index=%u, ep_type=%u, ring type=%u\n", ep_index,
+			 ep_type, ring->type);
 
-	if (vendor_data->op_mode != USB_OFFLOAD_STOP &&
-	    ring->type == TYPE_ISOC) {
-		kfree(ring->first_seg);
-		kfree(virt_dev->eps[ep_index].ring);
-	} else
-		xhci_ring_free(xhci, virt_dev->eps[ep_index].ring);
+		if (vendor_data->op_mode != USB_OFFLOAD_STOP &&
+			ring->type == TYPE_ISOC) {
+			kfree(ring->first_seg);
+			kfree(virt_dev->eps[ep_index].ring);
+		} else
+			xhci_ring_free(xhci, virt_dev->eps[ep_index].ring);
 
-	virt_dev->eps[ep_index].ring = NULL;
+		virt_dev->eps[ep_index].ring = NULL;
+		virt_dev->eps[ep_index].new_ring = NULL;
+
+		return;
+	}
+
+	if (new_ring) {
+		xhci_dbg(xhci, "ep_index=%u, ep_type=%u, new_ring type=%u\n", ep_index,
+			 ep_type, new_ring->type);
+
+		if (vendor_data->op_mode != USB_OFFLOAD_STOP &&
+			new_ring->type == TYPE_ISOC) {
+			kfree(new_ring->first_seg);
+			kfree(virt_dev->eps[ep_index].new_ring);
+		} else
+			xhci_ring_free(xhci, virt_dev->eps[ep_index].new_ring);
+
+		virt_dev->eps[ep_index].new_ring = NULL;
+
+		return;
+	}
 }
 
 static bool usb_offload_skip_urb(struct xhci_hcd *xhci, struct urb *urb)
@@ -565,6 +588,19 @@ static bool usb_offload_skip_urb(struct xhci_hcd *xhci, struct urb *urb)
 	return false;
 }
 
+static void alloc_container_ctx(struct xhci_hcd *xhci, struct xhci_container_ctx *ctx,
+				int type, gfp_t flags)
+{
+	ctx->bytes = dma_pool_zalloc(xhci->device_pool, flags, &ctx->dma);
+	if (!ctx->bytes)
+		xhci_err(xhci, "fail to allocate ctx->bytes\n");
+}
+
+static void free_container_ctx(struct xhci_hcd *xhci, struct xhci_container_ctx *ctx)
+{
+	dma_pool_free(xhci->device_pool, ctx->bytes, ctx->dma);
+}
+
 static struct xhci_vendor_ops ops = {
 	.vendor_init = usb_audio_offload_init,
 	.vendor_cleanup = usb_audio_offload_cleanup,
@@ -576,6 +612,8 @@ static struct xhci_vendor_ops ops = {
 	.free_transfer_ring = free_transfer_ring,
 	.sync_dev_ctx = sync_dev_ctx,
 	.usb_offload_skip_urb = usb_offload_skip_urb,
+	.alloc_container_ctx = alloc_container_ctx,
+	.free_container_ctx = free_container_ctx,
 };
 
 int xhci_vendor_helper_init(void)
