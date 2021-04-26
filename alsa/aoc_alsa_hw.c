@@ -72,6 +72,23 @@ static int hw_id_to_phone_mic_source(int hw_id)
 	return mic_input_source;
 }
 
+/* temp usage */
+static aoc_audio_stream_type[] = {
+	[0] = MMAPED,  [1] = NORMAL,   [2] = NORMAL,  [3] = NORMAL,  [4] = NORMAL,
+	[5] = NORMAL,  [6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,
+	[10] = NORMAL, [11] = NORMAL,  [12] = NORMAL, [13] = NORMAL, [14] = NORMAL,
+	[15] = NORMAL, [16] = NORMAL,  [17] = NORMAL, [18] = INCALL, [19] = INCALL,
+	[20] = INCALL, [21] = INCALL,  [22] = INCALL,
+};
+
+int aoc_pcm_device_to_stream_type(int device)
+{
+	if (device < 0 || device >= ARRAY_SIZE(aoc_audio_stream_type))
+		return -1;
+
+	return aoc_audio_stream_type[device];
+}
+
 /*
  * Sending commands to AoC for setting parameters and start/stop the streams
  */
@@ -92,7 +109,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 	spin_lock(&chip->audio_lock);
 
 	/* Get the aoc audio control channel at runtime */
-	err = alloc_aoc_audio_service(cmd_channel, &dev);
+	err = alloc_aoc_audio_service(cmd_channel, &dev, NULL, NULL);
 	if (err < 0) {
 		spin_unlock(&chip->audio_lock);
 		return err;
@@ -888,12 +905,14 @@ static int aoc_audio_path_bind(int src, int dst, int cmd, struct aoc_chip *chip)
 int aoc_audio_path_open(struct aoc_chip *chip, int src, int dest)
 {
 	uint32_t src_idx, dest_idx;
+	bool src_for_capture;
 
+	src_for_capture = src & AOC_TX;
 	src_idx = AOC_ID_TO_INDEX(src);
 	dest_idx = AOC_ID_TO_INDEX(dest);
 
 	/* voice call capture or playback */
-	if (src_idx == 3 || src_idx == 4)
+	if ((src_idx == 3 && src_for_capture) || (src_idx == 4 && !src_for_capture))
 		return aoc_phonecall_path_open(chip, src_idx, dest_idx, dest & AOC_TX);
 
 	if (src_idx == IDX_VOIP)
@@ -905,12 +924,14 @@ int aoc_audio_path_open(struct aoc_chip *chip, int src, int dest)
 int aoc_audio_path_close(struct aoc_chip *chip, int src, int dest)
 {
 	uint32_t src_idx, dest_idx;
+	bool src_for_capture;
 
+	src_for_capture = src & AOC_TX;
 	src_idx = AOC_ID_TO_INDEX(src);
 	dest_idx = AOC_ID_TO_INDEX(dest);
 
 	/* voice call capture or playback */
-	if (src_idx == 3 || src_idx == 4)
+	if ((src_idx == 3 && src_for_capture) || (src_idx == 4 && !src_for_capture))
 		return aoc_phonecall_path_close(chip, src_idx, dest_idx, dest & AOC_TX);
 
 	if (src_idx == IDX_VOIP)
@@ -1162,6 +1183,23 @@ static int aoc_audio_capture_mic_input(struct aoc_chip *chip,
 	return err;
 }
 
+static int aoc_mmap_capture_trigger(struct aoc_alsa_stream *alsa_stream, int record_cmd)
+{
+	int err = 0;
+	int cmd_id;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_MIC_MMAP_ENABLE_ID :
+					       CMD_AUDIO_INPUT_MIC_MMAP_DISABLE_ID;
+
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in audio mmap capture start/stop\n", err);
+		return err;
+	}
+	return 0;
+}
+
 /* Start or stop the stream */
 static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int record_cmd)
 {
@@ -1180,6 +1218,11 @@ static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int re
 
 		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL,
 					chip);
+		if (err < 0) {
+			pr_err("ERR:%d in audio input mic record start/stop\n", err);
+			goto exit;
+		}
+
 	} else {
 		switch (chip->audio_capture_mic_source) {
 		case USB_MIC:
@@ -1195,6 +1238,17 @@ static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int re
 			goto exit;
 		}
 		err = aoc_audio_capture_mic_input(chip, record_cmd, mic_input_source);
+		if (err < 0) {
+			pr_err("ERR:%d in audio capture mic input setup start/stop\n", err);
+			goto exit;
+		}
+	}
+
+	/* For mmap capture */
+	if (alsa_stream->stream_type == MMAPED) {
+		err = aoc_mmap_capture_trigger(alsa_stream, record_cmd);
+		if (err < 0)
+			pr_err("ERR:%d in aoc mmap capture start/stop\n", err);
 	}
 
 exit:

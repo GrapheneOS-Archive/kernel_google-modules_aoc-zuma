@@ -16,10 +16,101 @@
 #include "aoc_alsa.h"
 #include "aoc_alsa_drv.h"
 
+static void aoc_compr_reset_handler(aoc_aud_service_event_t evnt, void *cookies)
+{
+	struct aoc_alsa_stream *alsa_stream = (struct aoc_alsa_stream *)cookies;
+
+	if (!alsa_stream || !alsa_stream->cstream) {
+		pr_err("%s: no active compress offload stream pointer\n", __func__);
+		return;
+	}
+
+	if (evnt == AOC_SERVICE_EVENT_DOWN) {
+		pr_debug("%s: AoC service is removed, wakeup sleep thread\n", __func__);
+		alsa_stream->cstream->runtime->state = SNDRV_PCM_STATE_DISCONNECTED;
+		snd_compr_fragment_elapsed(alsa_stream->cstream);
+		return;
+	}
+}
+
+void aoc_compr_offload_isr(struct aoc_service_dev *dev)
+{
+	struct aoc_alsa_stream *alsa_stream;
+	unsigned long consumed, n;
+
+	if (!dev) {
+		pr_err("ERR: NULL compress offload aoc service pointer\n");
+		return;
+	}
+
+	alsa_stream = dev->prvdata;
+	if (!alsa_stream || !alsa_stream->cstream) {
+		pr_err("ERR: NULL compress offload stream pointer\n");
+		return;
+	}
+
+	pm_wakeup_ws_event(alsa_stream->chip->wakelock, 3000, true);
+
+	/*
+	 * The number of bytes read/writtien should be the bytes in the buffer
+	 * already played out in the case of playback. But this may not be true
+	 * in the AoC ring buffer implementation, since the reader pointer in
+	 * the playback case represents what has been read from the buffer,
+	 * not what already played out .
+	 */
+
+	/* Check EOF (n>0), and then flush the buffer for next EOF */
+	n = aoc_ring_bytes_available_to_read(alsa_stream->dev_eof->service, AOC_UP);
+	if (n > 0 && !aoc_ring_flush_read_data(alsa_stream->dev_eof->service, AOC_UP, 0)) {
+		pr_err("ERR: decoder_eof ring buffer flush fail\n");
+	}
+
+	if (aoc_ring_bytes_available_to_read(dev->service, AOC_DOWN) == 0) {
+		pr_info("compress offload ring buffer is depleted\n");
+		snd_compr_drain_notify(alsa_stream->cstream);
+		return;
+	}
+
+	consumed = aoc_ring_bytes_read(dev->service, AOC_DOWN);
+
+	/* TODO: To do more on no pointer update? */
+	if (consumed == alsa_stream->prev_consumed)
+		return;
+
+	pr_debug("compr offload consumed = %lu, hw_ptr_base = %lu\n", consumed,
+		 alsa_stream->hw_ptr_base);
+
+	/* To deal with overlfow in Tx or Rx in int32_t */
+	if (consumed < alsa_stream->prev_consumed) {
+		alsa_stream->n_overflow++;
+		pr_notice("overflow in Tx/Rx: %lu - %lu - %d times\n", consumed,
+			  alsa_stream->prev_consumed, alsa_stream->n_overflow);
+	}
+	alsa_stream->prev_consumed = consumed;
+
+	/* Update the pcm pointer */
+	if (unlikely(alsa_stream->n_overflow)) {
+		alsa_stream->pos = (consumed + 0x100000000 * alsa_stream->n_overflow -
+				    alsa_stream->hw_ptr_base) %
+				   alsa_stream->buffer_size;
+	} else {
+		alsa_stream->pos = (consumed - alsa_stream->hw_ptr_base) % alsa_stream->buffer_size;
+	}
+
+	/* Wake up the sleeping thread */
+	if (alsa_stream->cstream)
+		snd_compr_fragment_elapsed(alsa_stream->cstream);
+
+	return;
+}
+
 /* TODO: the handler has to be changed based on the compress offload */
 /*  the pointer should be modified based on the interrupt from AoC */
 static enum hrtimer_restart aoc_compr_hrtimer_irq_handler(struct hrtimer *timer)
 {
+#ifdef AOC_COMPR_HRTIMER_IRQ_HANDLER_BYPASS
+	return HRTIMER_NORESTART;
+#else
 	struct aoc_alsa_stream *alsa_stream;
 	struct aoc_service_dev *dev;
 	unsigned long consumed;
@@ -86,6 +177,7 @@ static enum hrtimer_restart aoc_compr_hrtimer_irq_handler(struct hrtimer *timer)
 		snd_compr_fragment_elapsed(alsa_stream->cstream);
 
 	return HRTIMER_RESTART;
+#endif
 }
 
 static int aoc_compr_prepare(struct aoc_alsa_stream *alsa_stream)
@@ -130,6 +222,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 
 	struct aoc_alsa_stream *alsa_stream = NULL;
 	struct aoc_service_dev *dev = NULL;
+	struct aoc_service_dev *dev_eof = NULL;
 	int idx;
 	int err;
 
@@ -142,18 +235,25 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	pr_notice("alsa compr offload open (%d)\n", idx);
 	pr_debug("chip open (%d)\n", chip->opened);
 
+	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
+	if (alsa_stream == NULL) {
+		err = -ENOMEM;
+		pr_err("ERR: no memory for %s", rtd->dai_link->name);
+		goto out;
+	}
+
 	/* Find the corresponding aoc audio service */
-	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev);
+	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, aoc_compr_reset_handler,
+			alsa_stream);
 	if (err < 0) {
 		pr_err("ERR: fail to alloc service for %s",
 		       rtd->dai_link->name);
 		goto out;
 	}
 
-	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
-	if (alsa_stream == NULL) {
-		err = -ENOMEM;
-		pr_err("ERR: no memory for %s", rtd->dai_link->name);
+	err = alloc_aoc_audio_service(AOC_COMPR_OFFLOAD_EOF_SERVICE, &dev_eof, NULL, NULL);
+	if (err < 0) {
+		pr_err("ERR: fail to alloc service for " AOC_COMPR_OFFLOAD_EOF_SERVICE);
 		goto out;
 	}
 
@@ -162,6 +262,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	alsa_stream->cstream = cstream;
 	alsa_stream->substream = NULL;
 	alsa_stream->dev = dev;
+	alsa_stream->dev_eof = dev_eof;
 	alsa_stream->idx = idx;
 
 	err = aoc_audio_open(alsa_stream);
@@ -179,6 +280,8 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	hrtimer_init(&(alsa_stream->hr_timer), CLOCK_MONOTONIC,
 		     HRTIMER_MODE_REL);
 	alsa_stream->hr_timer.function = &aoc_compr_hrtimer_irq_handler;
+
+	dev->prvdata = alsa_stream; /* For interrupt-driven playback */
 
 	alsa_stream->entry_point_idx = idx;
 
@@ -199,7 +302,9 @@ out:
 	kfree(alsa_stream);
 	if (dev) {
 		free_aoc_audio_service(rtd->dai_link->name, dev);
+		free_aoc_audio_service(AOC_COMPR_OFFLOAD_EOF_SERVICE, dev_eof);
 		dev = NULL;
+		dev_eof = NULL;
 	}
 	chip->alsa_stream[idx] = NULL;
 	chip->opened &= ~(1 << idx);
@@ -229,6 +334,8 @@ static int aoc_compr_playback_free(struct snd_compr_stream *cstream)
 
 	pr_notice("alsa compr offload close\n");
 	free_aoc_audio_service(rtd->dai_link->name, alsa_stream->dev);
+	free_aoc_audio_service(AOC_COMPR_OFFLOAD_EOF_SERVICE, alsa_stream->dev_eof);
+
 	/*
 	 * Call stop if it's still running. This happens when app
 	 * is force killed and we don't get a stop trigger.
@@ -313,9 +420,12 @@ static int aoc_compr_trigger(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstrea
 		pr_debug("%s: SNDRV_PCM_TRIGGER_STOP\n", __func__);
 		if (alsa_stream->running) {
 			err = aoc_audio_stop(alsa_stream);
-			if (err != 0)
+			if (err != 0) {
 				pr_err("failed to STOP alsa device (%d)\n",
 				       err);
+				/* return 0 to wake up sleep thread to unblock compress_poll() */
+				err = 0;
+			}
 			alsa_stream->running = 0;
 		}
 

@@ -1851,7 +1851,7 @@ static int aoc_snd_card_probe(struct platform_device *pdev)
 		return -ENOSYS;
 
 	/* Check if the AoC service is up */
-	ret = alloc_aoc_audio_service(CMD_OUTPUT_CHANNEL, &aoc_dev);
+	ret = alloc_aoc_audio_service(CMD_OUTPUT_CHANNEL, &aoc_dev, NULL, NULL);
 	if (ret < 0) {
 		if (ret == -EPROBE_DEFER)
 			pr_info("%s: wait for aoc output ctrl\n", __func__);
@@ -1882,6 +1882,8 @@ static int aoc_snd_card_probe(struct platform_device *pdev)
 		pr_err("%s: Failed to init aoc chip\n", __func__);
 		goto err;
 	}
+
+	pdata->g_chip.wakelock = wakeup_source_register(dev, dev_name(dev));
 
 	card->owner = THIS_MODULE;
 	card->dev = dev;

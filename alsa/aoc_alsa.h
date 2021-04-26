@@ -43,11 +43,15 @@
 #define CMD_CHANNEL(_dev)                                                      \
 	(strcmp(dev_name(&(_dev)->dev), CMD_INPUT_CHANNEL)) ? "output" : "input"
 
+#define AOC_COMPR_OFFLOAD_SERVICE "audio_playback6"
+#define AOC_COMPR_OFFLOAD_EOF_SERVICE "decoder_eof"
+
 #define AOC_CMD_DEBUG_ENABLE
 #define WAITING_TIME_MS 100
 
 #define PCM_TIMER_INTERVAL_NANOSECS 10e6
 #define COMPR_OFFLOAD_TIMER_INTERVAL_NANOSECS 5000e6
+#define AOC_COMPR_HRTIMER_IRQ_HANDLER_BYPASS
 #define DEFAULT_PCM_WAIT_TIME_IN_MSECS 10000
 
 /* Default mic and sink for audio capturing/playback */
@@ -139,6 +143,9 @@ enum {
 	A2DP_ENCODER_PARAMETERS,
 };
 enum { ULL = 0, LL0, LL1, LL2, LL3, DEEP_BUFFER, OFF_LOAD, HAPTICS = 10, SIDETONE = 11 };
+
+enum { NORMAL = 0, MMAPED, INCALL, HIFI, COMPRESS };
+
 enum { BUILTIN_MIC0 = 0, BUILTIN_MIC1, BUILTIN_MIC2, BUILTIN_MIC3 };
 enum { MIC_LOW_POWER_GAIN = 0, MIC_HIGH_POWER_GAIN, MIC_CURRENT_GAIN };
 enum { DEFAULT_MIC = 0, BUILTIN_MIC, USB_MIC, BT_MIC, IN_CALL_MUSIC };
@@ -181,6 +188,7 @@ struct aoc_chip {
 	bool voip_tx_prepared;
 	bool voip_path_vote[PORT_MAX];
 	bool voice_path_vote[PORT_MAX];
+	struct wakeup_source *wakelock;
 
 	int compr_offload_volume;
 	int mic_spatial_module_enable;
@@ -207,8 +215,10 @@ struct aoc_alsa_stream {
 	unsigned long timer_interval_ns;
 
 	struct aoc_service_dev *dev;
+	struct aoc_service_dev *dev_eof; /* Aoc service for EOF in compr offload */
 	int idx; /* PCM device number */
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
+	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
@@ -247,6 +257,8 @@ int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_incall_stop(struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_voip_start(struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_voip_stop(struct aoc_alsa_stream *alsa_stream);
+
+int aoc_pcm_device_to_stream_type(int device);
 
 int aoc_audio_path_open(struct aoc_chip *chip, int src, int dest);
 int aoc_audio_path_close(struct aoc_chip *chip, int src, int dest);
@@ -314,6 +326,7 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);
 int prepare_voipcall(struct aoc_alsa_stream *alsa_stream);
 int teardown_voipcall(struct aoc_alsa_stream *alsa_stream);
 
+void aoc_compr_offload_isr(struct aoc_service_dev *dev);
 int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type);
 int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream);
