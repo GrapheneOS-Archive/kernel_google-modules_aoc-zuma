@@ -68,6 +68,10 @@
 #define AOC_FWDATA_BOARDID_DFL  0x20202
 #define AOC_FWDATA_BOARDREV_DFL 0x10000
 
+#define SENSOR_DIRECT_HEAP_SIZE SZ_4M
+#define PLAYBACK_HEAP_SIZE SZ_16K
+#define CAPTURE_HEAP_SIZE SZ_16K
+
 #define MAX_RESET_REASON_STRING_LEN 128UL
 
 enum AOC_FW_STATE {
@@ -94,7 +98,6 @@ struct aoc_prvdata {
 
 	struct work_struct online_work;
 	struct resource dram_resource;
-	struct dma_heap *sensor_heap;
 	aoc_map_handler map_handler;
 	void *map_handler_ctx;
 
@@ -110,6 +113,13 @@ struct aoc_prvdata {
 	size_t dram_size;
 	size_t aoc_req_size;
 	u32 aoc_s2mpu_saved_value;
+
+	struct dma_heap *sensor_heap;
+	struct dma_heap *audio_playback_heap;
+	struct dma_heap *audio_capture_heap;
+	phys_addr_t sensor_heap_base;
+	phys_addr_t audio_playback_heap_base;
+	phys_addr_t audio_capture_heap_base;
 
 	int watchdog_irq;
 	struct work_struct watchdog_work;
@@ -639,8 +649,12 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCSRAMRepaired, .value = sram_was_repaired },
 		{ .key = kAOCCarveoutAddress, .value = carveout_base},
 		{ .key = kAOCCarveoutSize, .value = carveout_size},
-		{ .key = kAOCSensorDirectHeapAddress, .value = carveout_base + (28 * SZ_1M)},
-		{ .key = kAOCSensorDirectHeapSize, .value = SZ_4M },
+		{ .key = kAOCSensorDirectHeapAddress, .value = prvdata->sensor_heap_base},
+		{ .key = kAOCSensorDirectHeapSize, .value = SENSOR_DIRECT_HEAP_SIZE },
+		{ .key = kAOCPlaybackHeapAddress, .value = prvdata->audio_playback_heap_base},
+		{ .key = kAOCPlaybackHeapSize, .value = PLAYBACK_HEAP_SIZE },
+		{ .key = kAOCCaptureHeapAddress, .value = prvdata->audio_capture_heap_base},
+		{ .key = kAOCCaptureHeapSize, .value = CAPTURE_HEAP_SIZE },
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
 		{ .key = kAOCEnableUART, .value = enable_uart }
@@ -753,7 +767,7 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 
 	return ring_base - aoc_dram_virt_mapping + prvdata->dram_resource.start;
 }
-EXPORT_SYMBOL(aoc_service_ring_base_phys_addr);
+EXPORT_SYMBOL_GPL(aoc_service_ring_base_phys_addr);
 
 bool aoc_service_flush_read_data(struct aoc_service_dev *dev)
 {
@@ -777,7 +791,7 @@ bool aoc_service_flush_read_data(struct aoc_service_dev *dev)
 	aoc_service_advance_read_index(service, AOC_UP, slots);
 	return true;
 }
-EXPORT_SYMBOL(aoc_service_flush_read_data);
+EXPORT_SYMBOL_GPL(aoc_service_flush_read_data);
 
 ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 			 size_t count, bool block)
@@ -845,7 +859,7 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 
 	return msg_size;
 }
-EXPORT_SYMBOL(aoc_service_read);
+EXPORT_SYMBOL_GPL(aoc_service_read);
 
 ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 				 size_t count, long timeout)
@@ -915,7 +929,7 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 
 	return msg_size;
 }
-EXPORT_SYMBOL(aoc_service_read_timeout);
+EXPORT_SYMBOL_GPL(aoc_service_read_timeout);
 
 ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 			  size_t count, bool block)
@@ -988,7 +1002,7 @@ ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 
 	return count;
 }
-EXPORT_SYMBOL(aoc_service_write);
+EXPORT_SYMBOL_GPL(aoc_service_write);
 
 ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *buffer,
 				  size_t count, long timeout)
@@ -1057,7 +1071,7 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 
 	return count;
 }
-EXPORT_SYMBOL(aoc_service_write_timeout);
+EXPORT_SYMBOL_GPL(aoc_service_write_timeout);
 
 int aoc_service_can_read(struct aoc_service_dev *dev)
 {
@@ -1557,13 +1571,13 @@ int aoc_driver_register(struct aoc_driver *driver)
 	driver->drv.bus = &aoc_bus_type;
 	return driver_register(&driver->drv);
 }
-EXPORT_SYMBOL(aoc_driver_register);
+EXPORT_SYMBOL_GPL(aoc_driver_register);
 
 void aoc_driver_unregister(struct aoc_driver *driver)
 {
 	driver_unregister(&driver->drv);
 }
-EXPORT_SYMBOL(aoc_driver_unregister);
+EXPORT_SYMBOL_GPL(aoc_driver_unregister);
 
 static void aoc_clear_gpio_interrupt(void)
 {
@@ -1869,7 +1883,7 @@ void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
 	prvdata->map_handler = handler;
 	prvdata->map_handler_ctx = ctx;
 }
-EXPORT_SYMBOL(aoc_set_map_handler);
+EXPORT_SYMBOL_GPL(aoc_set_map_handler);
 
 void aoc_remove_map_handler(struct aoc_service_dev *dev)
 {
@@ -1879,7 +1893,7 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev)
 	prvdata->map_handler = NULL;
 	prvdata->map_handler_ctx = NULL;
 }
-EXPORT_SYMBOL(aoc_remove_map_handler);
+EXPORT_SYMBOL_GPL(aoc_remove_map_handler);
 
 static void aoc_pheap_alloc_cb(struct samsung_dma_buffer *buffer, void *ctx)
 {
@@ -2072,23 +2086,47 @@ err_coredump:
 }
 #endif
 
-static bool aoc_create_ion_heap(struct aoc_prvdata *prvdata)
+static struct dma_heap *aoc_create_dma_buf_heap(struct aoc_prvdata *prvdata, const char *name,
+						phys_addr_t base, size_t size)
 {
-	phys_addr_t base = prvdata->dram_resource.start + (28 * SZ_1M);
 	struct device *dev = prvdata->dev;
-	size_t size = SZ_4M;
 	size_t align = SZ_16K;
-	const char *name = "sensor_direct_heap";
 	struct dma_heap *heap;
 
 	heap = ion_physical_heap_create(base, size, align, name, aoc_pheap_alloc_cb,
 					aoc_pheap_free_cb, dev);
 	if (IS_ERR(heap))
-		dev_err(dev, "heap creation failure: %ld\n", PTR_ERR(heap));
-	else
-		prvdata->sensor_heap = heap;
+		dev_err(dev, "heap \"%s\" creation failure: %ld\n", name, PTR_ERR(heap));
 
-	return !IS_ERR(heap);
+	return heap;
+}
+
+static bool aoc_create_dma_buf_heaps(struct aoc_prvdata *prvdata)
+{
+	phys_addr_t base = prvdata->dram_resource.start + resource_size(&prvdata->dram_resource);
+
+	base -= SENSOR_DIRECT_HEAP_SIZE;
+	prvdata->sensor_heap = aoc_create_dma_buf_heap(prvdata, "sensor_direct_heap",
+						       base, SENSOR_DIRECT_HEAP_SIZE);
+	prvdata->sensor_heap_base = base;
+	if (IS_ERR(prvdata->sensor_heap))
+		return false;
+
+	base -= PLAYBACK_HEAP_SIZE;
+	prvdata->audio_playback_heap = aoc_create_dma_buf_heap(prvdata, "audio_capture_heap",
+							       base, PLAYBACK_HEAP_SIZE);
+	prvdata->audio_playback_heap_base = base;
+	if (IS_ERR(prvdata->audio_playback_heap))
+		return false;
+
+	base -= CAPTURE_HEAP_SIZE;
+	prvdata->audio_capture_heap = aoc_create_dma_buf_heap(prvdata, "audio_playback_heap",
+							      base, CAPTURE_HEAP_SIZE);
+	prvdata->audio_capture_heap_base = base;
+	if (IS_ERR(prvdata->audio_capture_heap))
+		return false;
+
+	return true;
 }
 
 static int aoc_open(struct inode *inode, struct file *file)
@@ -2497,8 +2535,8 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	aoc_configure_sysmmu(prvdata);
 
-	if (!aoc_create_ion_heap(prvdata)) {
-		pr_err("Unable to create heap\n");
+	if (!aoc_create_dma_buf_heaps(prvdata)) {
+		pr_err("Unable to create dma_buf heaps\n");
 		aoc_cleanup_resources(pdev);
 		return -ENOMEM;
 	}
