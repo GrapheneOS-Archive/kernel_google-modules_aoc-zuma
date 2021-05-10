@@ -30,7 +30,7 @@ static aoc_audio_sink[] = {
 	[PORT_USB_RX] = ASNK_USB,         [PORT_USB_TX] = -1,
 	[PORT_BT_RX] = ASNK_BT,           [PORT_BT_TX] = -1,
 	[PORT_INCALL_RX] = -1,            [PORT_INCALL_TX] = -1,
-	[PORT_INTERNAL_MIC] = -1,
+	[PORT_INTERNAL_MIC] = -1,	  [PORT_HAPTIC_RX] = ASNK_SPEAKER,
 };
 
 static int hw_id_to_sink(int hw_idx)
@@ -75,7 +75,7 @@ static int hw_id_to_phone_mic_source(int hw_id)
 /* temp usage */
 static aoc_audio_stream_type[] = {
 	[0] = MMAPED,	[1] = NORMAL,  [2] = NORMAL,  [3] = NORMAL,  [4] = NORMAL,  [5] = NORMAL,
-	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = NORMAL, [11] = NORMAL,
+	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = RAW, [11] = NORMAL,
 	[12] = NORMAL,	[13] = NORMAL, [14] = NORMAL, [15] = NORMAL, [16] = NORMAL, [17] = NORMAL,
 	[18] = INCALL,	[19] = INCALL, [20] = INCALL, [21] = INCALL, [22] = INCALL, [23] = MMAPED,
 };
@@ -101,16 +101,17 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 	struct timespec64 tv0, tv1;
 	int err, count;
 	unsigned long time_expired;
+	unsigned long flags = 0;
 
 	if (!cmd_channel || !cmd)
 		return -EINVAL;
 
-	spin_lock(&chip->audio_lock);
+	spin_lock_irqsave(&chip->audio_lock, flags);
 
 	/* Get the aoc audio control channel at runtime */
 	err = alloc_aoc_audio_service(cmd_channel, &dev, NULL, NULL);
 	if (err < 0) {
-		spin_unlock(&chip->audio_lock);
+		spin_unlock_irqrestore(&chip->audio_lock, flags);
 		return err;
 	}
 
@@ -195,7 +196,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 exit:
 	kfree(buffer);
 	free_aoc_audio_service(cmd_channel, dev);
-	spin_unlock(&chip->audio_lock);
+	spin_unlock_irqrestore(&chip->audio_lock, flags);
 
 	return err < 1 ? -EAGAIN : 0;
 }
@@ -906,6 +907,10 @@ int aoc_audio_path_open(struct aoc_chip *chip, int src, int dest)
 	uint32_t src_idx, dest_idx;
 	bool src_for_capture;
 
+	/* ignore nohost */
+	if (src & AOC_NOHOST)
+		return 0;
+
 	src_for_capture = src & AOC_TX;
 	src_idx = AOC_ID_TO_INDEX(src);
 	dest_idx = AOC_ID_TO_INDEX(dest);
@@ -924,6 +929,10 @@ int aoc_audio_path_close(struct aoc_chip *chip, int src, int dest)
 {
 	uint32_t src_idx, dest_idx;
 	bool src_for_capture;
+
+	/* ignore nohost */
+	if (src & AOC_NOHOST)
+		return 0;
 
 	src_for_capture = src & AOC_TX;
 	src_idx = AOC_ID_TO_INDEX(src);
@@ -1198,6 +1207,23 @@ static int aoc_mmap_capture_trigger(struct aoc_alsa_stream *alsa_stream, int rec
 	return 0;
 }
 
+static int aoc_raw_capture_trigger(struct aoc_alsa_stream *alsa_stream, int record_cmd)
+{
+	int err = 0;
+	int cmd_id;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_MIC_RAW_ENABLE_ID :
+					 CMD_AUDIO_INPUT_MIC_RAW_DISABLE_ID;
+
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in audio raw capture start/stop\n", err);
+		return err;
+	}
+	return 0;
+}
+
 /* Start or stop the stream */
 static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int record_cmd)
 {
@@ -1247,6 +1273,13 @@ static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int re
 		err = aoc_mmap_capture_trigger(alsa_stream, record_cmd);
 		if (err < 0)
 			pr_err("ERR:%d in aoc mmap capture start/stop\n", err);
+	}
+
+	/* For raw capture */
+	if (alsa_stream->stream_type == RAW) {
+		err = aoc_raw_capture_trigger(alsa_stream, record_cmd);
+		if (err < 0)
+			pr_err("ERR:%d in aoc raw capture start/stop\n", err);
 	}
 
 exit:
@@ -1405,15 +1438,16 @@ int aoc_lvm_enable_get(struct aoc_chip *chip, long *enable)
 	cmd.block = 14; /* ABLOCK_DCDOFF */
 	cmd.component = 0; /* LVM */
 	cmd.key = 16; /* ASP_LVM_PARAM_ENABLE */
-	pr_debug("lvm: %s\n", enable ? "enabled" : "disabled");
 
 	/* Send cmd to AOC */
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
 	if (err < 0) {
-		pr_err("ERR:%d in lvm set\n", err);
+		pr_err("ERR:%d in lvm get\n", err);
 		return err;
 	}
 
+	pr_debug("lvm: %s\n", cmd.val ? "enabled" : "disabled");
 	if (enable)
 		*enable = cmd.val;
 
@@ -1453,15 +1487,16 @@ int aoc_decoder_ref_enable_get(struct aoc_chip *chip, long *enable)
 	cmd.block = 14;
 	cmd.component = 1;
 	cmd.key = 0;
-	pr_debug("Decoder ref: %s\n", enable ? "enabled" : "disabled");
 
 	/* Send cmd to AOC */
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
 	if (err < 0) {
 		pr_err("ERR:%d in decoder ref get\n", err);
 		return err;
 	}
 
+	pr_debug("decoder ref: %s\n", cmd.val ? "enabled" : "disabled");
 	if (enable)
 		*enable = cmd.val;
 
