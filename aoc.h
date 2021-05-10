@@ -90,9 +90,11 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev);
 
 #define AOC_DOWNCALL_DOORBELL 12
 
-#define AOC_GPIO_BASE 0xB70000
+#define AOC_GPIO_BASE_WC  0xB70000
+#define AOC_GPIO_BASE_PRO 0xD70000
 
-#define AOC_PCU_BASE 0xB00000
+#define AOC_PCU_BASE_WC  0xB00000
+#define AOC_PCU_BASE_PRO 0xA00000
 #define AOC_PCU_DB_SET_OFFSET 0xD004
 #define AOC_PCU_DB_CLR_OFFSET 0xD008
 #define AOC_PCU_REVISION_OFFSET 0xF000

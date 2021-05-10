@@ -2,7 +2,7 @@
 /*
  * Google Whitechapel AoC Core Driver
  *
- * Copyright (c) 2019 Google LLC
+ * Copyright (c) 2019-2021 Google LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -61,6 +61,15 @@
 /* TODO: Remove internal calls, or promote to "public" */
 #include "aoc_ipc_core_internal.h"
 
+/* This should not be required, as we expect only one of the two to be defined */
+#if IS_ENABLED(CONFIG_SOC_GS201)
+    #undef CONFIG_SOC_GS101
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_GS201) && IS_ENABLED(CONFIG_SOC_GS101)
+    #error "GS201 and GS101 are mutually exclusive"
+#endif
+
 #define MAX_FIRMWARE_LENGTH 128
 #define AOC_S2MPU_CTRL0 0x0
 
@@ -75,6 +84,15 @@
 
 #define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
 #define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
+
+#if IS_ENABLED(CONFIG_SOC_GS201)
+	#define AOC_PCU_BASE  AOC_PCU_BASE_PRO
+	#define AOC_GPIO_BASE AOC_GPIO_BASE_PRO
+#elif IS_ENABLED(CONFIG_SOC_GS101)
+	#define AOC_PCU_BASE  AOC_PCU_BASE_WC
+	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
+	#define GPIO_INTERRUPT 93
+#endif
 
 enum AOC_FW_STATE {
 	AOC_STATE_OFFLINE = 0,
@@ -506,6 +524,7 @@ static int aoc_req_wait(struct aoc_prvdata *p, bool assert)
 
 extern int gs_chipid_get_ap_hw_tune_array(const u8 **array);
 
+#if IS_ENABLED(CONFIG_SOC_GS101)
 static bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata)
 {
 	const u8 *array;
@@ -527,6 +546,9 @@ static bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata)
 	/* Bit 65 says that AoC SRAM was repaired */
 	return ((array[8] & 0x2) != 0);
 }
+#else
+static inline bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata) { return false; }
+#endif
 
 struct aoc_fw_data {
 	u32 key;
@@ -1216,24 +1238,62 @@ static bool write_reset_trampoline(u32 addr)
 {
 	u32 *reset;
 	u32 instructions[] = {
-		0xe59f0030, /* ldr r0, .PCU_SLC_MIF_REQ_ADDR */
-		0xe3a01003, /* mov r1, #3 */
-		0xe5801000, /* str r1, [r0] */
-		/* mif_ack_loop: */
-		0xe5902004, /* ldr r2, [r0, #4] */
-		0xe3520002, /* cmp r2, #2 */
-		0x1afffffc, /* bne mif_ack_loop */
-		0xe59f0014, /* ldr r0, .PCU_POWER_STATUS_ADDR*/
-		0xe3a01004, /* mov r1, #4 */
-		0xe5801004, /* str r1, [r0, #4] */
-		/* blk_aoc_on_loop: */
-		0xe5902000, /* ldr r2, [r0] */
-		0xe3120004, /* tst r2, #4 */
-		0x0afffffc, /* beq blk_aoc_on_loop */
-		0xe59ff004, /* ldr pc, BOOTLOADER_START_ADDR */
-		0x00b02000, /* PCU_TOP_POWER_STATUS_ADDR */
-		0x00b0819c, /* PCU_SLC_MIF_REQ_ADDR */
-		addr /* BOOTLOADER_START_ADDR */
+        /* <start>: */
+        /*  0: */  0xe59f004c,  /* ldr     r0, [pc, #76]   ; 54 <.PCU_SLC_MIF_REQ_ADDR> */
+        /*  4: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 58 <.PCU_SLC_MIF_REQ_VALUE> */
+        /*  8: */  0xe5801000,  /* str     r1, [r0] */
+        /*  c: */  0xe59f0048,  /* ldr     r0, [pc, #72]   ; 5c <.PCU_SLC_MIF_ACK_ADDR> */
+        /* 10: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 64 <.PCU_SLC_MIF_ACK_VALUE> */
+        /* 14: */  0xe59f2044,  /* ldr     r2, [pc, #68]   ; 60 <.PCU_SLC_MIF_ACK_MASK> */
+
+        /* <mif_ack_loop>: */
+        /* 18: */  0xe5903000,  /* ldr     r3, [r0] */
+        /* 1c: */  0xe0033002,  /* and     r3, r3, r2 */
+        /* 20: */  0xe1530001,  /* cmp     r3, r1 */
+        /* 24: */  0x1afffffb,  /* bne     18 <mif_ack_loop> */
+        /* 28: */  0xe59f0038,  /* ldr     r0, [pc, #56]   ; 68 <.PCU_BLK_PWR_REQ_ADDR> */
+        /* 2c: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 6c <.PCU_BLK_PWR_REQ_VALUE> */
+        /* 30: */  0xe5801000,  /* str     r1, [r0] */
+        /* 34: */  0xe59f0034,  /* ldr     r0, [pc, #52]   ; 70 <.PCU_BLK_PWR_ACK_ADDR> */
+        /* 38: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 78 <.PCU_BLK_PWR_ACK_VALUE> */
+        /* 3c: */  0xe59f2030,  /* ldr     r2, [pc, #48]   ; 74 <.PCU_BLK_PWR_ACK_MASK> */
+
+        /* <blk_aoc_on_loop>: */
+        /* 40: */  0xe5903000,  /* ldr     r3, [r0] */
+        /* 44: */  0xe0033002,  /* and     r3, r3, r2 */
+        /* 48: */  0xe1530001,  /* cmp     r3, r1 */
+        /* 4c: */  0x1afffffb,  /* bne     40 <blk_aoc_on_loop> */
+        /* 50: */  0xe59ff024,  /* ldr     pc, [pc, #36]   ; 7c <.BOOTLOADER_START_ADDR> */
+
+
+        #if IS_ENABLED(CONFIG_SOC_GS201)
+          /* .PCU_SLC_MIF_REQ_ADDR:  */  0xA08000,
+          /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
+          /* .PCU_SLC_MIF_ACK_ADDR:  */  0xA08004,
+          /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
+          /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
+
+          /* .PCU_BLK_PWR_REQ_ADDR:  */  0xA0103C,
+          /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
+          /* .PCU_BLK_PWR_ACK_ADDR:  */  0xA0103C,
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x00000C,  /* POWER_MODE field is bits 3:2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* POWER_MODE = On, 0x1 (<< 2) */
+        #elif IS_ENABLED(CONFIG_SOC_GS101)
+          /* .PCU_SLC_MIF_REQ_ADDR:  */  0xB0819C,
+          /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
+          /* .PCU_SLC_MIF_ACK_ADDR:  */  0xB0819C,
+          /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
+          /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
+
+          /* .PCU_BLK_PWR_REQ_ADDR:  */  0xB02004,
+          /* .PCU_BLK_PWR_REQ_VALUE: */  0x000004,  /* BLK_AOC = Initiate Wakeup Sequence, 0x1 (<< 2) */
+          /* .PCU_BLK_PWR_ACK_ADDR:  */  0xB02000,
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x000004,  /* BLK_AOC field is bit 2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* BLK_AOC = Active, 0x1 (<< 2) */
+        #else
+            #error "Unsupported silicon"
+        #endif
+        /* .BOOTLOADER_START_ADDR: */  addr,
 	};
 
 	pr_notice("writing reset trampoline to addr %#x\n", addr);
@@ -1671,8 +1731,8 @@ EXPORT_SYMBOL_GPL(aoc_driver_unregister);
 
 static void aoc_clear_gpio_interrupt(void)
 {
-#ifndef AOC_JUNO
-	int reg = 93, val;
+#if defined(GPIO_INTERRUPT) && !defined(AOC_JUNO)
+	int reg = GPIO_INTERRUPT, val;
 	u32 *gpio_register =
 		aoc_sram_translate(AOC_GPIO_BASE + ((reg / 32) * 12));
 
@@ -1786,9 +1846,9 @@ static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
 #define SSMT_NS_READ_PID(n)	(0x4000 + 4 * (n))
 #define SSMT_NS_WRITE_PID(n)	(0x4200 + 4 * (n))
 
+#if IS_ENABLED(CONFIG_SOC_GS101)
 static void aoc_configure_ssmt(struct platform_device *pdev)
 {
-#ifndef AOC_JUNO
 	struct device *dev = &pdev->dev;
 	int stream_id;
 
@@ -1809,8 +1869,11 @@ static void aoc_configure_ssmt(struct platform_device *pdev)
 	}
 
 	devm_iounmap(dev, ssmt_base);
-#endif
 }
+#else
+static inline void aoc_configure_ssmt( struct platform_device *pdev
+    __attribute__((unused))) { }
+#endif
 
 static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 {
