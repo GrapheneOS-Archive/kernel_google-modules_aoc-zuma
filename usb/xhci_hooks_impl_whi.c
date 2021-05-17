@@ -8,12 +8,14 @@
 
 #include <linux/dmapool.h>
 #include <linux/dma-mapping.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/pm_wakeup.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/workqueue.h>
 #include <linux/usb/hcd.h>
+#include <linux/usb/phy.h>
 
 #include "xhci.h"
 #include "xhci-plat.h"
@@ -21,6 +23,8 @@
 
 #define SRAM_BASE 0x19000000
 #define SRAM_SIZE 0x600000
+#define DRAM_BASE 0x94000000
+#define DRAM_SIZE 0x3000000
 
 static BLOCKING_NOTIFIER_HEAD(aoc_usb_notifier_list);
 
@@ -171,43 +175,39 @@ static void xhci_reset_work(struct work_struct *ws)
 	struct xhci_vendor_data *vendor_data =
 		container_of(ws, struct xhci_vendor_data, xhci_vendor_reset_ws);
 	struct xhci_hcd *xhci = vendor_data->xhci;
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
 
+	if (mutex_lock_interruptible(&vendor_data->lock)) {
+		dev_err(dev, "xhci reset interrupted while waiting for lock\n");
+		return;
+	}
+
+	/*
+	 * After get the mutex, check the xhci->xhc_state before start to remove
+	 * and re-add hcd. If the xhci has gone, just give up this work.
+	 * NOTE: The headset might be removed during this work, so xhci->xhc_state
+	 * might become REMOVING before we finish this work in fact. However, we
+	 * just keep going this work, because later the cleanup will also remove
+	 * hcd again.
+	 */
 	if (IS_ERR_OR_NULL(xhci) ||
 	    xhci->xhc_state & XHCI_STATE_DYING ||
 	    xhci->xhc_state & XHCI_STATE_REMOVING) {
 		xhci_err(xhci, "xHCI dying, drop offload reset work\n");
 		goto fail;
 	}
-	usb_remove_hcd(xhci->shared_hcd);
 
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
-	    xhci->xhc_state & XHCI_STATE_REMOVING) {
-		xhci_err(xhci, "xHCI dying, ignore removing main_hcd\n");
-		goto fail;
-	}
+	usb_remove_hcd(xhci->shared_hcd);
 	usb_remove_hcd(xhci->main_hcd);
 
 	vendor_data->op_mode = USB_OFFLOAD_SIMPLE_AUDIO_ACCESSORY;
 
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
-	    xhci->xhc_state & XHCI_STATE_REMOVING) {
-		xhci_err(xhci, "xHCI dying, ignore adding main_hcd\n");
-		goto fail;
-	}
 	rc = usb_add_hcd(xhci->main_hcd, xhci->main_hcd->irq, IRQF_SHARED);
 	if (rc) {
 		xhci_err(xhci, "add main hcd error: %d\n", rc);
 		goto fail;
 	}
 
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
-	    xhci->xhc_state & XHCI_STATE_REMOVING) {
-		xhci_err(xhci, "xHCI dying, ignore adding shared_hcd\n");
-		goto fail;
-	}
 	rc = usb_add_hcd(xhci->shared_hcd, xhci->shared_hcd->irq, IRQF_SHARED);
 	if (rc) {
 		xhci_err(xhci, "add shared hcd error: %d\n", rc);
@@ -221,6 +221,7 @@ static void xhci_reset_work(struct work_struct *ws)
 	xhci_dbg(xhci, "xhci reset for usb audio offload was done\n");
 
 fail:
+	mutex_unlock(&vendor_data->lock);
 	return;
 }
 
@@ -437,6 +438,7 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 		return ret;
 	}
 
+	mutex_init(&vendor_data->lock);
 	INIT_WORK(&vendor_data->xhci_vendor_reset_ws, xhci_reset_work);
 	usb_register_notify(&xhci_udev_nb);
 	vendor_data->op_mode = USB_OFFLOAD_STOP;
@@ -447,9 +449,28 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 	return 0;
 }
 
+static void usb_audio_offload_remove_hcd(struct xhci_hcd *xhci)
+{
+	struct xhci_vendor_data *vendor_data = xhci_to_priv(xhci)->vendor_data;
+
+	if (mutex_lock_interruptible(&vendor_data->lock)) {
+		xhci_err(xhci, "remove hcd interrupted while waiting for lock\n");
+		return;
+	}
+
+	usb_remove_hcd(xhci->shared_hcd);
+	xhci->shared_hcd = NULL;
+	usb_phy_shutdown(xhci->main_hcd->usb_phy);
+	usb_remove_hcd(xhci->main_hcd);
+
+	mutex_unlock(&vendor_data->lock);
+}
+
 static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 {
 	struct xhci_vendor_data *vendor_data = xhci_to_priv(xhci)->vendor_data;
+
+	usb_audio_offload_remove_hcd(xhci);
 
 	vendor_data->usb_audio_offload = false;
 	vendor_data->op_mode = USB_OFFLOAD_STOP;
@@ -460,14 +481,22 @@ static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 
 	usb_unregister_notify(&xhci_udev_nb);
 
+	mutex_destroy(&vendor_data->lock);
+
 	kfree(vendor_data);
 	xhci_to_priv(xhci)->vendor_data = NULL;
 }
 
-static bool is_dma_in_sram(dma_addr_t dma)
+/* TODO: There is an issue that data missing happened when transfer ring
+ * allocated in SRAM and working w/ high-speed mode 125us data packet interval.
+ * b/188012253 to track the issue.
+ */
+static bool is_dma_for_offload(dma_addr_t dma)
 {
-	if (dma >= SRAM_BASE && dma < SRAM_BASE + SRAM_SIZE)
+	if ((dma >= SRAM_BASE && dma < SRAM_BASE + SRAM_SIZE) ||
+	    (dma >= DRAM_BASE && dma < DRAM_BASE + DRAM_SIZE))
 		return true;
+
 	return false;
 }
 
@@ -483,7 +512,7 @@ static bool is_usb_offload_enabled(struct xhci_hcd *xhci,
 
 	if (global_enabled) {
 		ep_ring = vdev->eps[ep_index].ring;
-		if (is_dma_in_sram(ep_ring->first_seg->dma))
+		if (is_dma_for_offload(ep_ring->first_seg->dma))
 			return true;
 	}
 
