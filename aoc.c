@@ -735,6 +735,11 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	aoc_board_config_parse(prvdata->dev->of_node, &board_id, &board_rev);
 
+	if (!fw) {
+		dev_err(dev, "failed to load firmware image\n");
+		return;
+	}
+
 	for (i = 0; i < fw_data_entries; i++) {
 		if (fw_data[i].key == kAOCBoardID)
 			fw_data[i].value = board_id;
@@ -744,8 +749,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	aoc_req_assert(prvdata, true);
 
-	if (!fw || !fw->data) {
-		dev_err(dev, "failed to load firmware image\n");
+	if (!fw->data) {
+		dev_err(dev, "firmware image contains no data\n");
 		goto free_fw;
 	}
 
@@ -2772,7 +2777,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		dev_err(dev, "failed to register acpm aoc reset callback\n");
 		rc = -EIO;
-		goto err_acmp_reset;
+		/* goto err_acmp_reset; */
 	}
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
@@ -2792,7 +2797,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_acmp_reset:
+/* err_acmp_reset: */
 #ifdef AOC_JUNO
 err_aoc_irq_req:
 #endif
