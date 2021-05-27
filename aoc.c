@@ -1265,11 +1265,13 @@ static bool write_reset_trampoline(u32 addr)
         /* 10: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 64 <.PCU_SLC_MIF_ACK_VALUE> */
         /* 14: */  0xe59f2044,  /* ldr     r2, [pc, #68]   ; 60 <.PCU_SLC_MIF_ACK_MASK> */
 
+#if 0  // FIXME: MIF ACK is not working right now
         /* <mif_ack_loop>: */
         /* 18: */  0xe5903000,  /* ldr     r3, [r0] */
         /* 1c: */  0xe0033002,  /* and     r3, r3, r2 */
         /* 20: */  0xe1530001,  /* cmp     r3, r1 */
         /* 24: */  0x1afffffb,  /* bne     18 <mif_ack_loop> */
+#endif
         /* 28: */  0xe59f0038,  /* ldr     r0, [pc, #56]   ; 68 <.PCU_BLK_PWR_REQ_ADDR> */
         /* 2c: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 6c <.PCU_BLK_PWR_REQ_VALUE> */
         /* 30: */  0xe5801000,  /* str     r1, [r0] */
