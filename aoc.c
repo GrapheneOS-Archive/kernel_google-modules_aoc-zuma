@@ -1257,6 +1257,7 @@ static bool write_reset_trampoline(u32 addr)
 {
 	u32 *reset;
 	u32 instructions[] = {
+#if 0  // FIXME: MIF ACK is not working right now
         /* <start>: */
         /*  0: */  0xe59f004c,  /* ldr     r0, [pc, #76]   ; 54 <.PCU_SLC_MIF_REQ_ADDR> */
         /*  4: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 58 <.PCU_SLC_MIF_REQ_VALUE> */
@@ -1265,7 +1266,6 @@ static bool write_reset_trampoline(u32 addr)
         /* 10: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 64 <.PCU_SLC_MIF_ACK_VALUE> */
         /* 14: */  0xe59f2044,  /* ldr     r2, [pc, #68]   ; 60 <.PCU_SLC_MIF_ACK_MASK> */
 
-#if 0  // FIXME: MIF ACK is not working right now
         /* <mif_ack_loop>: */
         /* 18: */  0xe5903000,  /* ldr     r3, [r0] */
         /* 1c: */  0xe0033002,  /* and     r3, r3, r2 */
