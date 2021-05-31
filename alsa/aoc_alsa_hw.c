@@ -78,6 +78,7 @@ static aoc_audio_stream_type[] = {
 	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = RAW, [11] = NORMAL,
 	[12] = NORMAL,	[13] = NORMAL, [14] = NORMAL, [15] = NORMAL, [16] = NORMAL, [17] = NORMAL,
 	[18] = INCALL,	[19] = INCALL, [20] = INCALL, [21] = INCALL, [22] = INCALL, [23] = MMAPED,
+	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
@@ -622,6 +623,51 @@ int aoc_incall_playback_enable_set(struct aoc_chip *chip, int stream, long val)
 	}
 
 	pr_info("%s: set incall playback stream %d state as %d\n", __func__, stream, cmd.enable);
+
+	return 0;
+}
+
+int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long *val)
+{
+	int err;
+	struct CMD_AUDIO_INPUT_INCALL_MUSIC_CHAN cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_GET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
+
+	cmd.ring = stream;
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+				chip);
+	if (err < 0) {
+		pr_err("ERR:%d in get incall music stream %d mic channel\n", err, stream);
+		return err;
+	}
+
+	if (val)
+		*val = cmd.channel;
+
+	pr_info("incall playback stream %d: mic channel get :%d\n", stream, cmd.channel);
+
+	return 0;
+}
+
+int aoc_incall_playback_mic_channel_set(struct aoc_chip *chip, int stream, long val)
+{
+	int err;
+	struct CMD_AUDIO_INPUT_INCALL_MUSIC_CHAN cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_SET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
+	cmd.ring = stream;
+	cmd.channel = val;
+
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+				chip);
+	if (err < 0) {
+		pr_err("ERR:%d in incall playback stream %d: mic channel set as %d\n", err, stream,
+		       cmd.channel);
+		return err;
+	}
+
+	pr_info("incall playback stream %d: mic channel :%d set\n", stream, cmd.channel);
 
 	return 0;
 }
@@ -1525,6 +1571,54 @@ int aoc_decoder_ref_enable_set(struct aoc_chip *chip, long enable)
 	return 0;
 }
 
+int aoc_compr_offload_linear_gain_get(struct aoc_chip *chip, long *val)
+{
+	int err;
+	struct CMD_AUDIO_OUTPUT_DEC_CH_GAIN cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_DEC_CH_GAIN_GET_ID, sizeof(cmd));
+
+	cmd.ch_bit_mask = 0x03;
+
+	/* Send cmd to AOC */
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+				chip);
+
+	if (err < 0) {
+		pr_err("ERR:%d in decoder ref get\n", err);
+		return err;
+	}
+
+	if (val) {
+		val[0] = cmd.ch_gains[0];
+		val[1] = cmd.ch_gains[1];
+	}
+
+	return 0;
+}
+
+int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
+{
+	int err;
+	struct CMD_AUDIO_OUTPUT_DEC_CH_GAIN cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_DEC_CH_GAIN_SET_ID, sizeof(cmd));
+
+	cmd.ch_bit_mask = 0x03;
+
+	cmd.ch_gains[0] = val[0];
+	cmd.ch_gains[1] = val[1];
+
+	/* Send cmd to AOC */
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in compr offload linear gain set\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable)
 {
 	int err = 0;
@@ -1626,10 +1720,53 @@ int aoc_audio_stop(struct aoc_alsa_stream *alsa_stream)
 	return err;
 }
 
+static int aoc_audio_hifi_start(struct aoc_alsa_stream *alsa_stream)
+{
+	int cmd_id, err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		cmd_id = CMD_AUDIO_OUTPUT_USB_HIFI_PLAYBACK_START_ID;
+		err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+		if (err < 0)
+			pr_err("ERR:%d in usb hifi playback start on\n", err);
+	} else {
+		cmd_id = CMD_AUDIO_INPUT_USB_HIFI_CAPTURE_START_ID;
+		err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+		if (err < 0)
+			pr_err("ERR:%d in usb hifi capture start on\n", err);
+	}
+
+	return err;
+}
+
+static int aoc_audio_hifi_stop(struct aoc_alsa_stream *alsa_stream)
+{
+	int cmd_id, err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		cmd_id = CMD_AUDIO_OUTPUT_USB_HIFI_PLAYBACK_STOP_ID;
+		err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+		if (err < 0)
+			pr_err("ERR:%d in usb hifi playback stop on\n", err);
+	} else {
+		cmd_id = CMD_AUDIO_INPUT_USB_HIFI_CAPTURE_STOP_ID;
+		err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+		if (err < 0)
+			pr_err("ERR:%d in usb hifi capture stop on\n", err);
+	}
+
+	return err;
+}
+
 int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 {
 	int stream, err = 0;
 	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->stream_type == HIFI)
+		return aoc_audio_hifi_start(alsa_stream);
 
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1652,6 +1789,9 @@ int aoc_audio_incall_stop(struct aoc_alsa_stream *alsa_stream)
 {
 	int stream, err = 0;
 	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->stream_type == HIFI)
+		return aoc_audio_hifi_stop(alsa_stream);
 
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
