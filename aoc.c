@@ -1912,6 +1912,33 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping carveout failed\n");
 
+#if IS_ENABLED(CONFIG_SOC_GS201)
+	/* Use a 1MB mapping instead of individual mailboxes for now */
+	/* TODO: Turn the mailbox address ranges into dtb entries */
+	if (iommu_map(domain, 0x9E000000, 0x18200000, SZ_2M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping mailboxes failed\n");
+
+	/* Map in GSA mailbox */
+	if (iommu_map(domain, 0x9E200000, 0x17C00000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping gsa mailbox failed\n");
+
+	/* Map in BLK_TPU */
+	/* if (iommu_map(domain, 0x9E300000, 0x1CE00000, SZ_2M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping mailboxes failed\n"); */
+
+	/* Map in USB for low power audio */
+	/* if (iommu_map(domain, 0x9E500000, 0x11100000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping usb failed\n"); */
+
+	/* Map in modem registers */
+	/* if (iommu_map(domain, 0x9E600000, 0x40000000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping modem failed\n"); */
+#else
 	/* Use a 1MB mapping instead of individual mailboxes for now */
 	/* TODO: Turn the mailbox address ranges into dtb entries */
 	if (iommu_map(domain, 0x9E000000, 0x17600000, SZ_1M,
@@ -1932,6 +1959,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping modem failed\n");
+#endif
 #endif
 }
 
