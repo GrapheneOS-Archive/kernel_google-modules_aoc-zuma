@@ -47,8 +47,10 @@ static int xhci_sync_dev_ctx(struct xhci_hcd *xhci, unsigned int slot_id)
 	struct get_dev_ctx_args args;
 	u8 *dev_ctx;
 
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
+	if (IS_ERR_OR_NULL(xhci))
+		return -ENODEV;
+
+	if (xhci->xhc_state & XHCI_STATE_DYING ||
 	    xhci->xhc_state & XHCI_STATE_REMOVING) {
 		xhci_err(xhci, "xHCI dying, ignore sync_dev_ctx\n");
 		return -ENODEV;
@@ -175,10 +177,9 @@ static void xhci_reset_work(struct work_struct *ws)
 	struct xhci_vendor_data *vendor_data =
 		container_of(ws, struct xhci_vendor_data, xhci_vendor_reset_ws);
 	struct xhci_hcd *xhci = vendor_data->xhci;
-	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
 
 	if (mutex_lock_interruptible(&vendor_data->lock)) {
-		dev_err(dev, "xhci reset interrupted while waiting for lock\n");
+		pr_err("xhci reset interrupted while waiting for lock\n");
 		return;
 	}
 
@@ -190,8 +191,12 @@ static void xhci_reset_work(struct work_struct *ws)
 	 * just keep going this work, because later the cleanup will also remove
 	 * hcd again.
 	 */
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
+	if (IS_ERR_OR_NULL(xhci)) {
+		pr_err("xHCI null, drop offload reset work\n");
+		goto fail;
+	}
+
+	if (xhci->xhc_state & XHCI_STATE_DYING ||
 	    xhci->xhc_state & XHCI_STATE_REMOVING) {
 		xhci_err(xhci, "xHCI dying, drop offload reset work\n");
 		goto fail;
@@ -265,6 +270,7 @@ static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 				xhci_sync_conn_stat(USB_CONNECTED);
 			}
 		}
+		vendor_data->usb_accessory_enabled = false;
 		break;
 	case USB_DEVICE_REMOVE:
 		if (is_compatible_with_usb_audio_offload(udev) &&
@@ -272,6 +278,7 @@ static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 		    USB_OFFLOAD_SIMPLE_AUDIO_ACCESSORY) {
 			xhci_sync_conn_stat(USB_DISCONNECTED);
 		}
+		vendor_data->usb_accessory_enabled = false;
 		break;
 	}
 
@@ -296,8 +303,12 @@ static void xhci_vendor_irq_work(struct work_struct *work)
 	unsigned int slot_id = 1;
 	int ret;
 
-	if (IS_ERR_OR_NULL(xhci) ||
-	    xhci->xhc_state & XHCI_STATE_DYING ||
+	if (IS_ERR_OR_NULL(xhci)) {
+		pr_err("xHCI null, ignore irq work\n");
+		return;
+	}
+
+	if (xhci->xhc_state & XHCI_STATE_DYING ||
 	    xhci->xhc_state & XHCI_STATE_REMOVING) {
 		xhci_err(xhci, "xHCI dying, ignore irq work\n");
 		return;
@@ -358,7 +369,7 @@ out:
 
 static int xhci_vendor_init_irq_workqueue(struct xhci_vendor_data *vendor_data)
 {
-	vendor_data->irq_wq = alloc_workqueue("xhci_vendor_irq_work", 0, 0);
+	vendor_data->irq_wq = alloc_workqueue("xhci_vendor_irq_work", WQ_UNBOUND, 0);
 
 	if (!vendor_data->irq_wq) {
 		return -ENOMEM;
@@ -519,6 +530,34 @@ static bool is_usb_offload_enabled(struct xhci_hcd *xhci,
 	return false;
 }
 
+/* TODO: there is a issue if urb is submitted but not transfer
+ * after USB connection is disconnected immediately.
+ * b/189074283 is used to track the formal solution.
+ */
+static bool is_usb_bulk_transfer_enabled(struct xhci_hcd *xhci, struct urb *urb)
+{
+	struct xhci_vendor_data *vendor_data = xhci_to_priv(xhci)->vendor_data;
+	struct usb_endpoint_descriptor *desc = &urb->ep->desc;
+	int ep_type = usb_endpoint_type(desc);
+	struct usb_ctrlrequest *cmd;
+	bool skip_bulk = false;
+
+	cmd = (struct usb_ctrlrequest *) urb->setup_packet;
+
+	if (ep_type == USB_ENDPOINT_XFER_CONTROL) {
+		if (!usb_endpoint_dir_in(desc) && cmd->bRequest == 0x35) {
+			vendor_data->usb_accessory_enabled = true;
+		} else {
+			vendor_data->usb_accessory_enabled = false;
+		}
+	}
+
+	if (ep_type == USB_ENDPOINT_XFER_BULK && !usb_endpoint_dir_in(desc))
+		skip_bulk = vendor_data->usb_accessory_enabled;
+
+	return skip_bulk;
+}
+
 static irqreturn_t queue_irq_work(struct xhci_hcd *xhci)
 {
 	struct xhci_vendor_data *vendor_data = xhci_to_priv(xhci)->vendor_data;
@@ -662,6 +701,9 @@ static bool usb_offload_skip_urb(struct xhci_hcd *xhci, struct urb *urb)
 	xhci_dbg(xhci, "ep_index=%u, ep_type=%d\n", ep_index, ep_type);
 
 	if (is_usb_offload_enabled(xhci, vdev, ep_index))
+		return true;
+
+	if (is_usb_bulk_transfer_enabled(xhci, urb))
 		return true;
 
 	return false;

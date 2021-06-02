@@ -285,6 +285,8 @@ int aoc_incall_capture_enable_get(struct aoc_chip *chip, int stream, long *val);
 int aoc_incall_capture_enable_set(struct aoc_chip *chip, int stream, long val);
 int aoc_incall_playback_enable_get(struct aoc_chip *chip, int stream, long *val);
 int aoc_incall_playback_enable_set(struct aoc_chip *chip, int stream, long val);
+int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long *val);
+int aoc_incall_playback_mic_channel_set(struct aoc_chip *chip, int stream, long val);
 int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute);
 int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute);
 
@@ -332,6 +334,8 @@ int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_pause(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_resume(struct aoc_alsa_stream *alsa_stream);
+int aoc_compr_offload_linear_gain_get(struct aoc_chip *chip, long *val);
+int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val);
 
 int aoc_mic_loopback(struct aoc_chip *chip, int enable);
 
