@@ -14,6 +14,8 @@
 /* Volume maximum and minimum */
 #define CTRL_VOL_MIN 0
 #define CTRL_VOL_MAX 1000
+#define AOC_MIC_RECORD_GAIN_IN_DB_MIN -40
+#define AOC_MIC_RECORD_GAIN_IN_DB_MAX 30
 
 #define COMPRE_OFFLOAD_GAIN_MIN 0
 #define COMPRE_OFFLOAD_GAIN_MAX 8388608 /* 2^23 = 8388608 */
@@ -432,6 +434,41 @@ static int incall_playback_mic_channel_ctl_get(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int mic_record_gain_ctl_set(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_mic_record_gain_set(chip, val);
+	if (err < 0)
+		pr_err("ERR:%d mic record gain set to %d fail\n", err, val);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int mic_record_gain_ctl_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_mic_record_gain_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d mic record gain get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int lvm_enable_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
@@ -652,9 +689,9 @@ static int compr_offload_volume_set(struct snd_kcontrol *kcontrol,
 	chip->compr_offload_volume = ucontrol->value.integer.value[0];
 
 	/* temporary solution */
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_SPEAKER);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_USB);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_BT);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_SPEAKER);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_USB);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_BT);
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -1171,7 +1208,7 @@ static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
 static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
 				       "ESCO",	       "A2DP_RAW",
 				       "A2DP_ENC_SBC", "A2DP_ENC_AAC" };
-static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, ASNK_BT, bt_mode_texts);
+static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
 /* TODO: seek better way to create a series of controls  */
 static const char *block_asp_mode_texts[] = { "ASP_OFF", "ASP_ON", "ASP_BYPASS",
@@ -1446,8 +1483,11 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 					  SIDETONE_BIQUAD_PARAM_NUM, aoc_sidetone_eq_ctl_get,
 					  aoc_sidetone_eq_ctl_set, NULL),
 
-	SOC_SINGLE_EXT("MIC Recording Gain (dB)", SND_SOC_NOPM, 0, 100, 0, NULL,
-		       NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("MIC Record Soft Gain (dB)", SND_SOC_NOPM, 0,
+					  AOC_MIC_RECORD_GAIN_IN_DB_MIN,
+					  AOC_MIC_RECORD_GAIN_IN_DB_MAX, 1, mic_record_gain_ctl_get,
+					  mic_record_gain_ctl_set, NULL),
+
 	SOC_SINGLE_EXT("Compress Offload Volume", SND_SOC_NOPM, 0, 100, 0, compr_offload_volume_get,
 		       compr_offload_volume_set),
 

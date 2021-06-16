@@ -16,6 +16,64 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 
+static bool is_aaudio_mmaped_service(const char *name)
+{
+	return strcmp(name, AOC_MMAP_PLAYBACK_SERVICE) == 0 ||
+	       strcmp(name, AOC_MMAP_CAPTURE_SERVICE) == 0;
+}
+
+static void free_aoc_service_work_handler(struct work_struct *work)
+{
+	struct aoc_alsa_stream *alsa_stream =
+		container_of(work, struct aoc_alsa_stream, free_aoc_service_work);
+	struct snd_soc_pcm_runtime *rtd = alsa_stream->substream->private_data;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (!is_aaudio_mmaped_service(rtd->dai_link->name))
+		return;
+
+	aoc_timer_stop_sync(alsa_stream);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex)) {
+		pr_err("ERR: interrupted while waiting for lock\n");
+		return;
+	}
+
+	free_aoc_audio_service(rtd->dai_link->name, alsa_stream->dev);
+
+	/* To avoid accessing already removed aoc service in pcm prepare for aaudio */
+	alsa_stream->dev = NULL;
+
+	mutex_unlock(&chip->audio_mutex);
+	return;
+}
+
+static void aoc_pcm_reset_handler(aoc_aud_service_event_t evnt, void *cookies)
+{
+	struct aoc_alsa_stream *alsa_stream = (struct aoc_alsa_stream *)cookies;
+
+	if (!alsa_stream || !alsa_stream->substream) {
+		pr_err("%s: no active substream pointer\n", __func__);
+		return;
+	}
+
+	if (evnt == AOC_SERVICE_EVENT_DOWN) {
+		pr_debug("%s: AoC service is removed, wakeup sleep thread\n", __func__);
+		/*
+		 * We don't hold stream lock here before change stream's state because of avoiding
+		 * deadlock on stream lock and chip->audio_lock. The tasks without checking xrun
+		 * still return error since AOC isn't ready. Most of alsa stream tasks from
+		 * user-space will be returned by xrun state.
+		 */
+		alsa_stream->substream->runtime->status->state = SNDRV_PCM_STATE_XRUN;
+		wake_up(&alsa_stream->substream->runtime->sleep);
+		wake_up(&alsa_stream->substream->runtime->tsleep);
+
+		schedule_work(&alsa_stream->free_aoc_service_work);
+		return;
+	}
+}
+
 /* Timer interrupt to read the ring buffer reader/writer positions */
 void aoc_timer_start(struct aoc_alsa_stream *alsa_stream)
 {
@@ -79,6 +137,9 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 	alsa_stream = container_of(timer, struct aoc_alsa_stream, hr_timer);
 
 	WARN_ON(!alsa_stream || !alsa_stream->substream);
+
+	if(alsa_stream->substream->runtime->status->state != SNDRV_PCM_STATE_RUNNING)
+			return HRTIMER_NORESTART;
 
 	/* Start the timer immediately for next period */
 	/* aoc_timer_start(alsa_stream); */
@@ -165,13 +226,6 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	pr_debug("pcm device open (%d)\n", idx);
 	pr_debug("chip open (%d)\n", chip->opened);
 
-	/* Find the corresponding aoc audio service */
-	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, NULL, NULL);
-	if (err < 0) {
-		pr_err("ERR:%d fail to alloc service for %s", err, rtd->dai_link->name);
-		goto out;
-	}
-
 	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
 	if (alsa_stream == NULL) {
 		err = -ENOMEM;
@@ -183,9 +237,19 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	alsa_stream->chip = chip;
 	alsa_stream->substream = substream;
 	alsa_stream->cstream = NULL;
-	alsa_stream->dev = dev;
 	alsa_stream->idx = idx;
 	alsa_stream->stream_type = aoc_pcm_device_to_stream_type(idx);
+
+	INIT_WORK(&alsa_stream->free_aoc_service_work, free_aoc_service_work_handler);
+
+	/* Find the corresponding aoc audio service */
+	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, aoc_pcm_reset_handler,
+			alsa_stream);
+	if (err < 0) {
+		pr_err("ERR:%d fail to alloc service for %s", err, rtd->dai_link->name);
+		goto out;
+	}
+	alsa_stream->dev = dev;
 
 	/* Ring buffer will be flushed at prepare() before playback/capture */
 	alsa_stream->hw_ptr_base = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
@@ -217,12 +281,17 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	return 0;
 out:
-	kfree(alsa_stream);
 	if (dev) {
 		free_aoc_audio_service(rtd->dai_link->name, dev);
-		dev = NULL;
+		if (alsa_stream)
+		    alsa_stream->dev = NULL;
 	}
 	mutex_unlock(&chip->audio_mutex);
+
+	if (alsa_stream) {
+		cancel_work_sync(&alsa_stream->free_aoc_service_work);
+		kfree(alsa_stream);
+	}
 
 	pr_debug("pcm open err=%d\n", err);
 	return err;
@@ -251,6 +320,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 
 	pr_debug("alsa pcm close\n");
 	free_aoc_audio_service(rtd->dai_link->name, alsa_stream->dev);
+	alsa_stream->dev = NULL;
 	/*
 	* Call stop if it's still running. This happens when app
 	* is force killed and we don't get a stop trigger.
@@ -278,6 +348,8 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 	chip->opened &= ~(1 << alsa_stream->idx);
 
 	mutex_unlock(&chip->audio_mutex);
+
+	cancel_work_sync(&alsa_stream->free_aoc_service_work);
 
 	return 0;
 }
@@ -323,14 +395,21 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
-	struct aoc_service_dev *dev = alsa_stream->dev;
+	struct aoc_service_dev *dev;
 	struct aoc_chip *chip = alsa_stream->chip;
-	int channels, source_mode, err;
+	int channels, source_mode, err, avail;
 
 	aoc_timer_stop_sync(alsa_stream);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex))
 		return -EINTR;
+
+	dev = alsa_stream->dev;
+	if (!dev) {
+		err = -EIO;
+		pr_err("ERR in pcm prepare: AoC service not available\n");
+		goto out;
+	}
 
 	channels = alsa_stream->channels;
 
@@ -381,6 +460,15 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 
 	pr_debug("buffer_size=%d, period_size=%d pos=%d frame_bits=%d\n", alsa_stream->buffer_size,
 		 alsa_stream->period_size, alsa_stream->pos, runtime->frame_bits);
+
+	/* Advance the write ptr in the DRAM ring buffer for mmap-based playback */
+	if (alsa_stream->stream_type == MMAPED &&
+	    alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
+		if (!aoc_service_advance_write_index(dev->service, AOC_DOWN, avail)) {
+			dev_err(&(dev->dev), "ERR: in advancing pcm playback writer ptr\n");
+		}
+	}
 
 out:
 	mutex_unlock(&chip->audio_mutex);

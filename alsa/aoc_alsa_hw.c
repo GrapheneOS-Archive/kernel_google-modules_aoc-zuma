@@ -11,6 +11,7 @@
 
 #include "aoc_alsa.h"
 #include "aoc_alsa_drv.h"
+#include <linux/modem_notifier.h>
 
 #ifndef ALSA_AOC_CMD_LOG_DISABLE
 static int cmd_count;
@@ -22,15 +23,15 @@ static int cmd_count;
  * by sink-associated devices such as spker, headphone, bt, usb, mode
  */
 static aoc_audio_sink[] = {
-	[PORT_I2S_0_RX] = ASNK_HEADPHONE, [PORT_I2S_0_TX] = -1,
-	[PORT_I2S_1_RX] = ASNK_BT,        [PORT_I2S_1_TX] = -1,
-	[PORT_I2S_2_RX] = ASNK_USB,       [PORT_I2S_2_TX] = -1,
-	[PORT_TDM_0_RX] = ASNK_SPEAKER,   [PORT_TDM_0_TX] = -1,
-	[PORT_TDM_1_RX] = ASNK_MODEM,     [PORT_TDM_1_TX] = -1,
-	[PORT_USB_RX] = ASNK_USB,         [PORT_USB_TX] = -1,
-	[PORT_BT_RX] = ASNK_BT,           [PORT_BT_TX] = -1,
+	[PORT_I2S_0_RX] = SINK_HEADPHONE, [PORT_I2S_0_TX] = -1,
+	[PORT_I2S_1_RX] = SINK_BT,        [PORT_I2S_1_TX] = -1,
+	[PORT_I2S_2_RX] = SINK_USB,       [PORT_I2S_2_TX] = -1,
+	[PORT_TDM_0_RX] = SINK_SPEAKER,   [PORT_TDM_0_TX] = -1,
+	[PORT_TDM_1_RX] = SINK_MODEM,     [PORT_TDM_1_TX] = -1,
+	[PORT_USB_RX] = SINK_USB,         [PORT_USB_TX] = -1,
+	[PORT_BT_RX] = SINK_BT,           [PORT_BT_TX] = -1,
 	[PORT_INCALL_RX] = -1,            [PORT_INCALL_TX] = -1,
-	[PORT_INTERNAL_MIC] = -1,	  [PORT_HAPTIC_RX] = ASNK_SPEAKER,
+	[PORT_INTERNAL_MIC] = -1,	  [PORT_HAPTIC_RX] = SINK_SPEAKER,
 };
 
 static int hw_id_to_sink(int hw_idx)
@@ -78,7 +79,7 @@ static aoc_audio_stream_type[] = {
 	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = RAW, [11] = NORMAL,
 	[12] = NORMAL,	[13] = NORMAL, [14] = NORMAL, [15] = NORMAL, [16] = NORMAL, [17] = NORMAL,
 	[18] = INCALL,	[19] = INCALL, [20] = INCALL, [21] = INCALL, [22] = INCALL, [23] = MMAPED,
-	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,
+	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,  [27] = ANDROID_AEC,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
@@ -89,6 +90,10 @@ int aoc_pcm_device_to_stream_type(int device)
 	return aoc_audio_stream_type[device];
 }
 
+static bool aoc_pcm_is_mmap_raw(struct aoc_alsa_stream *alsa_stream)
+{
+	return (alsa_stream->stream_type == MMAPED || alsa_stream->stream_type == RAW);
+}
 /*
  * Sending commands to AoC for setting parameters and start/stop the streams
  */
@@ -178,6 +183,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 		       CMD_CHANNEL(dev), ((struct CMD_HDR *)cmd)->id);
 		print_hex_dump(KERN_ERR, ALSA_AOC_CMD " :mem ",
 			       DUMP_PREFIX_OFFSET, 16, 1, cmd, cmd_size, false);
+		aoc_trigger_watchdog(ALSA_CTL_TIMEOUT);
 	} else if (err == 4) {
 		pr_err(ALSA_AOC_CMD " ERR:%#x - cmd [%s] id %#06x\n",
 		       *(uint32_t *)buffer, CMD_CHANNEL(dev),
@@ -585,12 +591,12 @@ int aoc_incall_capture_enable_set(struct aoc_chip *chip, int stream, long val)
 int aoc_incall_playback_enable_get(struct aoc_chip *chip, int stream, long *val)
 {
 	int err;
-	struct CMD_AUDIO_INPUT_INCALL_MUSIC cmd;
+	struct CMD_AUDIO_OUTPUT_INCALL_MUSIC cmd;
 
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_GET_INCALL_MUSIC_ID, sizeof(cmd));
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_GET_INCALL_MUSIC_ID, sizeof(cmd));
 
 	cmd.ring = stream;
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
 				chip);
 	if (err < 0) {
 		pr_err("ERR:%d in get voice playback stream %d state\n", err, stream);
@@ -608,13 +614,13 @@ int aoc_incall_playback_enable_get(struct aoc_chip *chip, int stream, long *val)
 int aoc_incall_playback_enable_set(struct aoc_chip *chip, int stream, long val)
 {
 	int err;
-	struct CMD_AUDIO_INPUT_INCALL_MUSIC cmd;
+	struct CMD_AUDIO_OUTPUT_INCALL_MUSIC cmd;
 
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_SET_INCALL_MUSIC_ID, sizeof(cmd));
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_SET_INCALL_MUSIC_ID, sizeof(cmd));
 	cmd.ring = stream;
 	cmd.enable = val;
 
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
 				chip);
 	if (err < 0) {
 		pr_err("ERR:%d in set incall playback stream %d state as %d\n", err, stream,
@@ -630,12 +636,12 @@ int aoc_incall_playback_enable_set(struct aoc_chip *chip, int stream, long val)
 int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long *val)
 {
 	int err;
-	struct CMD_AUDIO_INPUT_INCALL_MUSIC_CHAN cmd;
+	struct CMD_AUDIO_OUTPUT_INCALL_MUSIC_CHAN cmd;
 
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_GET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_GET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
 
 	cmd.ring = stream;
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
 				chip);
 	if (err < 0) {
 		pr_err("ERR:%d in get incall music stream %d mic channel\n", err, stream);
@@ -653,13 +659,13 @@ int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long 
 int aoc_incall_playback_mic_channel_set(struct aoc_chip *chip, int stream, long val)
 {
 	int err;
-	struct CMD_AUDIO_INPUT_INCALL_MUSIC_CHAN cmd;
+	struct CMD_AUDIO_OUTPUT_INCALL_MUSIC_CHAN cmd;
 
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_SET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_SET_INCALL_MUSIC_CHAN_ID, sizeof(cmd));
 	cmd.ring = stream;
 	cmd.channel = val;
 
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
 				chip);
 	if (err < 0) {
 		pr_err("ERR:%d in incall playback stream %d: mic channel set as %d\n", err, stream,
@@ -804,8 +810,8 @@ int aoc_get_sink_mode(struct aoc_chip *chip, int sink)
 int aoc_set_sink_mode(struct aoc_chip *chip, int sink, int mode)
 {
 	int err;
-	struct CMD_AUDIO_OUTPUT_SINK cmd;
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_SINK_ID, sizeof(cmd));
+	struct CMD_AUDIO_OUTPUT_SINK2 cmd;
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_SINK2_ID, sizeof(cmd));
 
 	cmd.sink = sink;
 	cmd.mode = mode;
@@ -934,7 +940,7 @@ static int aoc_audio_path_bind(int src, int dst, int cmd, struct aoc_chip *chip)
 
 	pr_info("%s: src:%d - sink:%d!\n", cmd == START ? "bind" : "unbind", src, dst);
 
-	AocCmdHdrSet(&(bind.parent), CMD_AUDIO_OUTPUT_BIND_ID, sizeof(bind));
+	AocCmdHdrSet(&(bind.parent), CMD_AUDIO_OUTPUT_BIND2_ID, sizeof(bind));
 	bind.bind = (cmd == START) ? 1 : 0;
 	bind.src = src;
 	bind.dst = dst;
@@ -1095,7 +1101,8 @@ static int aoc_audio_capture_set_params(struct aoc_alsa_stream *alsa_stream,
 	/* TODO: more checks on mic id */
 	cmd.pdm_mask = 0; /* Default to usb/bt mic capturing */
 	if (chip->audio_capture_mic_source == BUILTIN_MIC) {
-		n_mic = (chip->mic_spatial_module_enable) ? N_MIC_IN_SPATIAL_MODULE : channels;
+		n_mic = (chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream))
+				 ? N_MIC_IN_SPATIAL_MODULE : channels;
 		for (i = 0; i < n_mic; i++) {
 			mic_id = chip->buildin_mic_id_list[i];
 			if (mic_id != -1) {
@@ -1152,7 +1159,7 @@ static int aoc_audio_capture_set_params(struct aoc_alsa_stream *alsa_stream,
 
 	cmd.requested_format.chan = channels;
 
-	if (chip->mic_spatial_module_enable)
+	if (chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream))
 		cmd.mic_process_index = AP_MIC_PROCESS_SPATIAL;
 	else
 		cmd.mic_process_index = AP_MIC_PROCESS_RAW;
@@ -1417,9 +1424,9 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 
 	if (param == 0) /* Up link (mic) */
 	{
-		cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
-		block = 135;
-		component = 30;
+		cmd_id = CMD_AUDIO_OUTPUT_GET_PARAMETER_ID;
+		block = 19;
+		component = 0;
 		key = 6;
 	} else /* Download link (sink) */
 	{
@@ -1432,7 +1439,7 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 	/* Send cmd to AOC */
 	err = aoc_audio_get_parameters(cmd_id, block, component, key, &value, chip);
 	if (err < 0) {
-		pr_err("ERR:%d in incall mute set\n", err);
+		pr_err("ERR:%d in incall mute get\n", err);
 		return err;
 	}
 
@@ -1449,9 +1456,9 @@ int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute)
 
 	if (param == 0) /* Up link (mic) */
 	{
-		cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
-		block = 135;
-		component = 30;
+		cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
+		block = 19;
+		component = 0;
 		key = 6;
 	} else /* Download link (sink) */
 	{
@@ -1467,6 +1474,51 @@ int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute)
 	err = aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
 	if (err < 0) {
 		pr_err("ERR:%d in incall mute set\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+/* can we get dB gain directly */
+int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	block = 136;
+	component = 30;
+	key = 16; /* for dB */
+
+	/* Send cmd to AOC */
+	err = aoc_audio_get_parameters(cmd_id, block, component, key, &value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in in mic record gain get\n", err);
+		return err;
+	}
+
+	if (val)
+		*val = value;
+
+	return 0;
+}
+
+int aoc_mic_record_gain_set(struct aoc_chip *chip, long val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
+	block = 136;
+	component = 30;
+	key = 16; /* for dB */
+	value = val; /* TODO: db value in float? */
+
+	/* Send cmd to AOC */
+	err = aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in mic record gain set\n", err);
 		return err;
 	}
 
@@ -1626,7 +1678,7 @@ int aoc_sidetone_enable(struct aoc_chip *chip, int enable)
 	int src, dest;
 
 	src = SIDETONE;
-	dest = ASNK_SPEAKER;
+	dest = SINK_SPEAKER;
 
 	pr_info("sidetone: %s \n", (enable) ? "Enabled" : "Disabled");
 
@@ -1760,6 +1812,36 @@ static int aoc_audio_hifi_stop(struct aoc_alsa_stream *alsa_stream)
 	return err;
 }
 
+static int aoc_audio_android_aec_start(struct aoc_alsa_stream *alsa_stream)
+{
+	int cmd_id, err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	cmd_id = CMD_AUDIO_OUTPUT_SPKR_ANDROID_AEC_START_ID;
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in android aec capture start\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+static int aoc_audio_android_aec_stop(struct aoc_alsa_stream *alsa_stream)
+{
+	int cmd_id, err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	cmd_id = CMD_AUDIO_OUTPUT_SPKR_ANDROID_AEC_STOP_ID;
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in android aec capture stop\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 {
 	int stream, err = 0;
@@ -1767,6 +1849,9 @@ int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 
 	if (alsa_stream->stream_type == HIFI)
 		return aoc_audio_hifi_start(alsa_stream);
+
+	if (alsa_stream->stream_type == ANDROID_AEC)
+		return aoc_audio_android_aec_start(alsa_stream);
 
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1792,6 +1877,9 @@ int aoc_audio_incall_stop(struct aoc_alsa_stream *alsa_stream)
 
 	if (alsa_stream->stream_type == HIFI)
 		return aoc_audio_hifi_stop(alsa_stream);
+
+	if (alsa_stream->stream_type == ANDROID_AEC)
+		return aoc_audio_android_aec_stop(alsa_stream);
 
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -1980,7 +2068,7 @@ int aoc_audio_set_params(struct aoc_alsa_stream *alsa_stream, uint32_t channels,
 		}
 
 		/* To deal with recording with spatial module enabled */
-		if (chip->mic_spatial_module_enable) {
+		if (chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream)) {
 			err = aoc_audio_capture_spatial_module_trigger(chip, START);
 			if (err < 0)
 				pr_err("ERR:%d mic proc spatial module failed to start!\n", err);
@@ -2412,6 +2500,8 @@ int prepare_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem start fail\n", err);
 
+	modem_voice_call_notify_event(MODEM_VOICE_CALL_ON, NULL);
+
 	return err;
 }
 
@@ -2431,6 +2521,8 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream)
 	err = aoc_modem_stop(alsa_stream->chip);
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem stop fail\n", err);
+
+	modem_voice_call_notify_event(MODEM_VOICE_CALL_OFF, NULL);
 
 	return err;
 }
@@ -2595,7 +2687,7 @@ int aoc_audio_close(struct aoc_alsa_stream *alsa_stream)
 
 	/* To deal with recording with spatial module enabled */
 	if (substream && substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
-	    chip->mic_spatial_module_enable) {
+	    chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream)) {
 		err = aoc_audio_capture_spatial_module_trigger(chip, STOP);
 		if (err < 0)
 			pr_err("ERR:%d mic proc spatial module failed to stop!\n", err);

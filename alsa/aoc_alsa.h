@@ -43,6 +43,8 @@
 #define CMD_CHANNEL(_dev)                                                      \
 	(strcmp(dev_name(&(_dev)->dev), CMD_INPUT_CHANNEL)) ? "output" : "input"
 
+#define AOC_MMAP_PLAYBACK_SERVICE "audio_playback0"
+#define AOC_MMAP_CAPTURE_SERVICE "audio_capture1"
 #define AOC_COMPR_OFFLOAD_SERVICE "audio_playback6"
 #define AOC_COMPR_OFFLOAD_EOF_SERVICE "decoder_eof"
 
@@ -96,6 +98,9 @@
 
 #define NULL_PATH -1
 
+/* Define trigger aoc watchdog reason */
+#define ALSA_CTL_TIMEOUT "alsa_ctl_timeout"
+
 /* TODO: Copied from AoC repo and will be removed */
 enum bluetooth_mode {
 	AHS_BT_MODE_UNCONFIGURED = 0,
@@ -144,7 +149,7 @@ enum {
 };
 enum { ULL = 0, LL0, LL1, LL2, LL3, DEEP_BUFFER, OFF_LOAD, HAPTICS = 10, SIDETONE = 11 };
 
-enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, COMPRESS };
+enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, ANDROID_AEC, COMPRESS };
 
 enum { BUILTIN_MIC0 = 0, BUILTIN_MIC1, BUILTIN_MIC2, BUILTIN_MIC3 };
 enum { MIC_LOW_POWER_GAIN = 0, MIC_HIGH_POWER_GAIN, MIC_CURRENT_GAIN };
@@ -235,6 +240,8 @@ struct aoc_alsa_stream {
 	int open;
 	int running;
 	int draining;
+
+	struct work_struct free_aoc_service_work;
 };
 
 void aoc_timer_start(struct aoc_alsa_stream *alsa_stream);
@@ -279,6 +286,9 @@ int aoc_mic_hw_gain_get(struct aoc_chip *chip, int state);
 int aoc_mic_hw_gain_set(struct aoc_chip *chip, int state, int gain);
 int aoc_mic_dc_blocker_get(struct aoc_chip *chip);
 int aoc_mic_dc_blocker_set(struct aoc_chip *chip, int enable);
+
+int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val);
+int aoc_mic_record_gain_set(struct aoc_chip *chip, long val);
 
 int aoc_voice_call_mic_mute(struct aoc_chip *chip, int mute);
 int aoc_incall_capture_enable_get(struct aoc_chip *chip, int stream, long *val);

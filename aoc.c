@@ -43,8 +43,11 @@
 #include <linux/uio.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/mutex.h>
 #include <soc/google/acpm_ipc_ctrl.h>
+#include <soc/google/debug-snapshot.h>
 #include <soc/google/exynos-cpupm.h>
+#include <soc/google/exynos-pmu-if.h>
 
 #include <linux/gsa/gsa_aoc.h>
 
@@ -82,7 +85,7 @@
 
 #define SENSOR_DIRECT_HEAP_SIZE SZ_4M
 #define PLAYBACK_HEAP_SIZE SZ_16K
-#define CAPTURE_HEAP_SIZE SZ_16K
+#define CAPTURE_HEAP_SIZE SZ_64K
 
 #define MAX_RESET_REASON_STRING_LEN 128UL
 
@@ -97,6 +100,8 @@
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
 	#define GPIO_INTERRUPT 93
 #endif
+
+static DEFINE_MUTEX(aoc_service_lock);
 
 enum AOC_FW_STATE {
 	AOC_STATE_OFFLINE = 0,
@@ -251,6 +256,9 @@ static int aoc_itmon_notifier(struct notifier_block *nb, unsigned long action,
 	struct itmon_notifier *itmon_info = nb_data;
 
 	prvdata = container_of(nb, struct aoc_prvdata, itmon_nb);
+	if (itmon_info->port && (strncmp(itmon_info->port, "AOC", sizeof("AOC") - 1) == 0))
+		return NOTIFY_STOP;
+
 	if (itmon_info->target_addr == 0) {
 		dev_err(prvdata->dev,
 			"Possible repro of b/174577569, please upload a bugreport and /data/vendor/ssrdump to that bug\n");
@@ -711,6 +719,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 enable_uart = prvdata->enable_uart_tx;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
+	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
+	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
+	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
 
 	struct aoc_fw_data fw_data[] = {
@@ -719,11 +730,11 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCSRAMRepaired, .value = sram_was_repaired },
 		{ .key = kAOCCarveoutAddress, .value = carveout_base},
 		{ .key = kAOCCarveoutSize, .value = carveout_size},
-		{ .key = kAOCSensorDirectHeapAddress, .value = prvdata->sensor_heap_base},
+		{ .key = kAOCSensorDirectHeapAddress, .value = sensor_heap},
 		{ .key = kAOCSensorDirectHeapSize, .value = SENSOR_DIRECT_HEAP_SIZE },
-		{ .key = kAOCPlaybackHeapAddress, .value = prvdata->audio_playback_heap_base},
+		{ .key = kAOCPlaybackHeapAddress, .value = playback_heap},
 		{ .key = kAOCPlaybackHeapSize, .value = PLAYBACK_HEAP_SIZE },
-		{ .key = kAOCCaptureHeapAddress, .value = prvdata->audio_capture_heap_base},
+		{ .key = kAOCCaptureHeapAddress, .value = capture_heap},
 		{ .key = kAOCCaptureHeapSize, .value = CAPTURE_HEAP_SIZE },
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
@@ -876,7 +887,6 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 
 	pr_debug("aoc DRAM starts at (virt): %pK, (phys):%llx, ring base (virt): %pK",
 		 aoc_dram_virt_mapping, prvdata->dram_resource.start, ring_base);
-	print_hex_dump(KERN_DEBUG, "aoc-mem ", DUMP_PREFIX_ADDRESS, 16, 1, ring_base, 16384, false);
 
 	if (out_size)
 		*out_size = aoc_service_ring_size(service, dir);
@@ -1368,8 +1378,13 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	const int aoc_watchdog_value_ssr = 4100 * 100;
 	const int aoc_reset_timeout_ms = 1000;
 	const u32 aoc_watchdog_control_ssr = 0x2F;
+	const unsigned int custom_in_offset = 0x3AC4;
+	const unsigned int custom_out_offset = 0x3AC0;
 	int rc;
 	void __iomem *pcu;
+	unsigned int custom_in;
+	unsigned int custom_out;
+	int ret;
 
 	pcu = aoc_sram_translate(AOC_PCU_BASE);
 	if (!pcu)
@@ -1396,7 +1411,15 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	dev_info(prvdata->dev, "waiting for aoc reset to finish\n");
 	if (wait_event_timeout(prvdata->aoc_reset_wait_queue, prvdata->aoc_reset_done,
 			       aoc_reset_timeout_ms) == 0) {
-		dev_err(prvdata->dev, "timed out waiting for aoc reset\n");
+		ret = exynos_pmu_read(custom_out_offset, &custom_out);
+		dev_err(prvdata->dev,
+				"AoC reset timeout custom_out=%d, ret=%d\n", custom_out, ret);
+		ret = exynos_pmu_read(custom_in_offset, &custom_in);
+		dev_err(prvdata->dev,
+				"AoC reset timeout custom_in=%d, ret=%d\n", custom_in, ret);
+
+		/* Trigger acpm ramdump since we timed out the aoc reset request */
+		dbg_snapshot_emergency_reboot("AoC Restart timed out");
 		return -ETIMEDOUT;
 	}
 	dev_info(prvdata->dev, "aoc reset finished\n");
@@ -2011,9 +2034,12 @@ static void aoc_did_become_online(struct work_struct *work)
 		}
 	}
 
+	mutex_lock(&aoc_service_lock);
+
 	prvdata->services = devm_kcalloc(prvdata->dev, s, sizeof(struct aoc_service_dev *), GFP_KERNEL);
 	if (!prvdata->services) {
 		dev_err(prvdata->dev, "failed to allocate service array\n");
+	        mutex_unlock(&aoc_service_lock);
 		return;
 	}
 
@@ -2028,10 +2054,18 @@ static void aoc_did_become_online(struct work_struct *work)
 
 	for (i = 0; i < s; i++)
 		device_register(&prvdata->services[i]->dev);
+
+	mutex_unlock(&aoc_service_lock);
 }
 
 static void aoc_take_offline(struct aoc_prvdata *prvdata)
 {
+	mutex_lock(&aoc_service_lock);
+
+	/* check if devices/services are ready */
+	if (aoc_state == AOC_STATE_OFFLINE || !prvdata->services)
+		goto exit;
+
 	pr_notice("taking aoc offline\n");
 	aoc_state = AOC_STATE_OFFLINE;
 
@@ -2043,6 +2077,8 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	devm_kfree(prvdata->dev, prvdata->services);
 	prvdata->services = NULL;
 	prvdata->total_services = 0;
+exit:
+	mutex_unlock(&aoc_service_lock);
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
@@ -2290,6 +2326,24 @@ err_coredump:
 	else
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
 }
+
+void aoc_trigger_watchdog(const char *reason)
+{
+	struct aoc_prvdata *prvdata;
+
+	if (!aoc_platform_device)
+		return;
+
+	prvdata = platform_get_drvdata(aoc_platform_device);
+	if (!prvdata)
+		return;
+
+	if (work_busy(&prvdata->watchdog_work))
+		return;
+
+	reset_store(prvdata->dev, NULL, reason, strlen(reason));
+}
+EXPORT_SYMBOL_GPL(aoc_trigger_watchdog);
 #endif
 
 static struct dma_heap *aoc_create_dma_buf_heap(struct aoc_prvdata *prvdata, const char *name,
