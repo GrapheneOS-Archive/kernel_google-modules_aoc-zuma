@@ -168,6 +168,7 @@ struct aoc_prvdata {
 	u32 disable_monitor_mode;
 	u32 enable_uart_tx;
 	u32 force_voltage_nominal;
+	u32 no_ap_resets;
 
 	u32 total_coredumps;
 	u32 total_restarts;
@@ -794,6 +795,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	else
 		dev_info(dev, "AoC using default DVFS on this device.\n");
 
+	if (prvdata->no_ap_resets)
+		dev_err(dev, "Resets by AP via sysfs are disabled\n");
+
 	if (!_aoc_fw_is_compatible(fw)) {
 		dev_err(dev, "firmware and drivers are incompatible\n");
 		goto free_fw;
@@ -1377,6 +1381,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	/* 4100 * 0.244 us * 100 = 100 ms */
 	const int aoc_watchdog_value_ssr = 4100 * 100;
 	const int aoc_reset_timeout_ms = 1000;
+	const int aoc_reset_tries = 3;
 	const u32 aoc_watchdog_control_ssr = 0x2F;
 	const unsigned int custom_in_offset = 0x3AC4;
 	const unsigned int custom_out_offset = 0x3AC0;
@@ -1385,6 +1390,8 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	unsigned int custom_in;
 	unsigned int custom_out;
 	int ret;
+	bool aoc_reset_successful;
+	int i;
 
 	pcu = aoc_sram_translate(AOC_PCU_BASE);
 	if (!pcu)
@@ -1398,26 +1405,36 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 		return rc;
 	}
 
-	dev_info(prvdata->dev, "resetting aoc\n");
-	writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
-	if ((readl(pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET) &
-			AOC_PCU_WATCHDOG_CONTROL_KEY_ENABLED_MASK) == 0) {
-		dev_err(prvdata->dev, "unlock aoc watchdog failed\n");
-		return -EINVAL;
-	}
-	writel(aoc_watchdog_value_ssr, pcu + AOC_PCU_WATCHDOG_VALUE_OFFSET);
-	writel(aoc_watchdog_control_ssr, pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET);
+	aoc_reset_successful = false;
+	for (i = 0; i < aoc_reset_tries; i++) {
+		dev_info(prvdata->dev, "resetting aoc\n");
+		writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
+		if ((readl(pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET) &
+				AOC_PCU_WATCHDOG_CONTROL_KEY_ENABLED_MASK) == 0) {
+			dev_err(prvdata->dev, "unlock aoc watchdog failed\n");
+		}
+		writel(aoc_watchdog_value_ssr, pcu + AOC_PCU_WATCHDOG_VALUE_OFFSET);
+		writel(aoc_watchdog_control_ssr, pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET);
 
-	dev_info(prvdata->dev, "waiting for aoc reset to finish\n");
-	if (wait_event_timeout(prvdata->aoc_reset_wait_queue, prvdata->aoc_reset_done,
-			       aoc_reset_timeout_ms) == 0) {
-		ret = exynos_pmu_read(custom_out_offset, &custom_out);
-		dev_err(prvdata->dev,
+		dev_info(prvdata->dev, "waiting for aoc reset to finish\n");
+		if (wait_event_timeout(prvdata->aoc_reset_wait_queue, prvdata->aoc_reset_done,
+				       aoc_reset_timeout_ms) == 0) {
+			ret = exynos_pmu_read(custom_out_offset, &custom_out);
+			dev_err(prvdata->dev,
 				"AoC reset timeout custom_out=%d, ret=%d\n", custom_out, ret);
-		ret = exynos_pmu_read(custom_in_offset, &custom_in);
-		dev_err(prvdata->dev,
+			ret = exynos_pmu_read(custom_in_offset, &custom_in);
+			dev_err(prvdata->dev,
 				"AoC reset timeout custom_in=%d, ret=%d\n", custom_in, ret);
-
+			dev_err(prvdata->dev, "PCU_WATCHDOG_CONTROL = 0x%x\n",
+				readl(pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET));
+			dev_err(prvdata->dev, "PCU_WATCHDOG_VALUE = 0x%x\n",
+				readl(pcu + AOC_PCU_WATCHDOG_VALUE_OFFSET));
+		} else {
+			aoc_reset_successful = true;
+			break;
+		}
+	}
+	if (!aoc_reset_successful) {
 		/* Trigger acpm ramdump since we timed out the aoc reset request */
 		dbg_snapshot_emergency_reboot("AoC Restart timed out");
 		return -ETIMEDOUT;
@@ -1660,8 +1677,12 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	reason_str[reason_str_len] = '\0';
 	dev_err(dev, "Reset requested from userspace, reason: %s", reason_str);
 
-	disable_irq_nosync(prvdata->watchdog_irq);
-	schedule_work(&prvdata->watchdog_work);
+	if (prvdata->no_ap_resets) {
+		dev_err(dev, "Reset request rejected, option disabled via persist options");
+	} else {
+		disable_irq_nosync(prvdata->watchdog_irq);
+		schedule_work(&prvdata->watchdog_work);
+	}
 	return count;
 }
 
@@ -2234,6 +2255,9 @@ static void aoc_watchdog(struct work_struct *work)
 
 	prvdata->total_restarts++;
 
+	sscd_info.name = "aoc";
+	sscd_info.seg_count = 0;
+
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
@@ -2249,13 +2273,17 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (!ramdump_header->valid) {
 		dev_err(prvdata->dev, "aoc coredump failed: timed out\n");
-		goto err_coredump;
+		strscpy(crash_info, "AoC Watchdog : coredump timeout",
+			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		goto coredump_submit;
 	}
 
 	if (memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
-		goto err_coredump;
+		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
+			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		goto coredump_submit;
 	}
 
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
@@ -2275,12 +2303,12 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 
-	sscd_info.name = "aoc";
 	if (ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags & RAMDUMP_FLAG_VALID)
 		strscpy(crash_info, (const char *)ramdump_header +
 			RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
 	else
-		strscpy(crash_info, "Unknown", RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		strscpy(crash_info, "AoC Watchdog : invalid crash info",
+			RAMDUMP_SECTION_CRASH_INFO_SIZE);
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
@@ -2291,6 +2319,8 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.segs[0].paddr = (void *)carveout_paddr_from_aoc;
 	sscd_info.segs[0].vaddr = (void *)carveout_vaddr_from_aoc;
 	sscd_info.seg_count = 1;
+
+coredump_submit:
 	/*
 	 * sscd_report() returns -EAGAIN if there are no readers to consume a
 	 * coredump. Retry sscd_report() with a sleep to handle the race condition
@@ -2373,14 +2403,14 @@ static bool aoc_create_dma_buf_heaps(struct aoc_prvdata *prvdata)
 		return false;
 
 	base -= PLAYBACK_HEAP_SIZE;
-	prvdata->audio_playback_heap = aoc_create_dma_buf_heap(prvdata, "audio_capture_heap",
+	prvdata->audio_playback_heap = aoc_create_dma_buf_heap(prvdata, "aaudio_playback_heap",
 							       base, PLAYBACK_HEAP_SIZE);
 	prvdata->audio_playback_heap_base = base;
 	if (IS_ERR(prvdata->audio_playback_heap))
 		return false;
 
 	base -= CAPTURE_HEAP_SIZE;
-	prvdata->audio_capture_heap = aoc_create_dma_buf_heap(prvdata, "audio_playback_heap",
+	prvdata->audio_capture_heap = aoc_create_dma_buf_heap(prvdata, "aaudio_capture_heap",
 							      base, CAPTURE_HEAP_SIZE);
 	prvdata->audio_capture_heap_base = base;
 	if (IS_ERR(prvdata->audio_capture_heap))
@@ -2445,6 +2475,23 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		prvdata->disable_monitor_mode = disable_mm;
 		if (prvdata->disable_monitor_mode != 0)
 			pr_info("AoC Monitor Mode disabled\n");
+
+		ret = 0;
+	}
+	break;
+
+	case AOC_IOCTL_DISABLE_AP_RESETS:
+	{
+		u32 disable_ap_resets;
+
+		BUILD_BUG_ON(sizeof(disable_ap_resets) != _IOC_SIZE(AOC_IOCTL_DISABLE_AP_RESETS));
+
+		if (copy_from_user(&disable_ap_resets, (u32 *)arg, _IOC_SIZE(cmd)))
+			break;
+
+		prvdata->no_ap_resets = disable_ap_resets;
+		if (prvdata->no_ap_resets != 0)
+			pr_info("AoC AP side resets disabled\n");
 
 		ret = 0;
 	}
@@ -2675,6 +2722,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->disable_monitor_mode = 0;
 	prvdata->enable_uart_tx = 0;
 	prvdata->force_voltage_nominal = 0;
+	prvdata->no_ap_resets = 0;
 
 	rc = find_gsa_device(prvdata);
 	if (rc) {
