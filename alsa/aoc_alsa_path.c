@@ -448,6 +448,8 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
+					SNDRV_PCM_FMTBIT_S24_3LE |
+					SNDRV_PCM_FMTBIT_FLOAT_LE |
 					SNDRV_PCM_FMTBIT_S32_LE,
 			.channels_min = 1,
 			.channels_max = 8,
@@ -1250,6 +1252,7 @@ const struct snd_kcontrol_new usb_rx_ctrl[] = {
 	SOC_SINGLE_EXT("EP6", SND_SOC_NOPM, IDX_EP6_RX, 1, 0, usb_rx_get, usb_rx_put),
 	SOC_SINGLE_EXT("EP7", SND_SOC_NOPM, IDX_EP7_RX, 1, 0, usb_rx_get, usb_rx_put),
 	SOC_SINGLE_EXT("VOIP", SND_SOC_NOPM, IDX_VOIP_RX, 1, 0, usb_rx_get, usb_rx_put),
+	SOC_SINGLE_EXT("HIFI", SND_SOC_NOPM, IDX_HIFI_RX, 1, 0, usb_rx_get, usb_rx_put),
 	SOC_SINGLE_EXT("RAW", SND_SOC_NOPM, IDX_RAW_RX, 1, 0, usb_rx_get, usb_rx_put),
 	SOC_SINGLE_EXT("NoHost1", SND_SOC_NOPM, IDX_NOHOST1_RX, 1, 0, usb_rx_get, usb_rx_put),
 };
@@ -1594,6 +1597,7 @@ const struct snd_soc_dapm_widget aoc_widget[] = {
 	SND_SOC_DAPM_AIF_IN("EP7_RX", "EP7 Playback", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("EP8_RX", "EP8 Playback", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("VOIP_RX", "audio_voip_rx", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("HIFI_RX", "audio_hifiout", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("RAW_RX", "audio_raw", 0, SND_SOC_NOPM, 0, 0),
 
 	/* Audio record */
@@ -1784,6 +1788,7 @@ static const struct snd_soc_dapm_route aoc_routes[] = {
 	{ "USB_RX Mixer", "EP6", "EP6_RX" },
 	{ "USB_RX Mixer", "EP7", "EP7_RX" },
 	{ "USB_RX Mixer", "VOIP", "VOIP_RX" },
+	{ "USB_RX Mixer", "HIFI", "HIFI_RX" },
 	{ "USB_RX Mixer", "RAW", "RAW_RX" },
 	{ "USB_RX Mixer", "NoHost1", "NoHost1_RX" },
 	{ "USB_RX", NULL, "USB_RX Mixer" },
