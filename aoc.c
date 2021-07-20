@@ -74,6 +74,7 @@
 #endif
 
 #define MAX_FIRMWARE_LENGTH 128
+#define AP_RESET_REASON_LENGTH 32
 #define AOC_S2MPU_CTRL0 0x0
 
 #define AOC_MAX_MINOR (1U)
@@ -153,6 +154,8 @@ struct aoc_prvdata {
 	int watchdog_irq;
 	struct work_struct watchdog_work;
 	bool aoc_reset_done;
+	bool ap_triggered_reset;
+	char ap_reset_reason[AP_RESET_REASON_LENGTH];
 	wait_queue_head_t aoc_reset_wait_queue;
 	unsigned int acpm_async_id;
 	int total_services;
@@ -1394,7 +1397,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	const int aoc_watchdog_value_ssr = 4100 * 100;
 	const int aoc_reset_timeout_ms = 1000;
 	const int aoc_reset_tries = 3;
-	const u32 aoc_watchdog_control_ssr = 0x2F;
+	const u32 aoc_watchdog_control_ssr = 0x3F;
 	const unsigned int custom_in_offset = 0x3AC4;
 	const unsigned int custom_out_offset = 0x3AC0;
 	int rc;
@@ -1685,6 +1688,11 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
 	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+		dev_err(dev, "Reset requested while AoC is not online");
+		return -ENODEV;
+	}
+
 	strscpy(reason_str, buf, reason_str_len);
 	reason_str[reason_str_len] = '\0';
 	dev_err(dev, "Reset requested from userspace, reason: %s", reason_str);
@@ -1693,6 +1701,8 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 		dev_err(dev, "Reset request rejected, option disabled via persist options");
 	} else {
 		disable_irq_nosync(prvdata->watchdog_irq);
+		strlcpy(prvdata->ap_reset_reason, reason_str, AP_RESET_REASON_LENGTH);
+		prvdata->ap_triggered_reset = true;
 		schedule_work(&prvdata->watchdog_work);
 	}
 	return count;
@@ -2122,6 +2132,13 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	prvdata->services = NULL;
 	prvdata->total_services = 0;
 
+	/* wakeup AOC before calling GSA */
+	aoc_req_assert(prvdata, true);
+	rc = aoc_req_wait(prvdata, true);
+	if (rc) {
+		dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+	}
+
 	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
 	 * as 2.  Change this when the header is updated
 	 */
@@ -2201,10 +2218,12 @@ static void aoc_pheap_alloc_cb(struct samsung_dma_buffer *buffer, void *ctx)
 	phys = aoc_dram_translate_to_aoc(prvdata, phys);
 	size = sg->sgl[0].length;
 
+	mutex_lock(&aoc_service_lock);
 	if (prvdata->map_handler) {
 		prvdata->map_handler((u64)buffer->priv, phys, size, true,
 				     prvdata->map_handler_ctx);
 	}
+	mutex_unlock(&aoc_service_lock);
 }
 
 static void aoc_pheap_free_cb(struct samsung_dma_buffer *buffer, void *ctx)
@@ -2225,10 +2244,12 @@ static void aoc_pheap_free_cb(struct samsung_dma_buffer *buffer, void *ctx)
 	phys = aoc_dram_translate_to_aoc(prvdata, phys);
 	size = sg->sgl[0].length;
 
+	mutex_lock(&aoc_service_lock);
 	if (prvdata->map_handler) {
 		prvdata->map_handler((u64)buffer->priv, phys, size, false,
 				     prvdata->map_handler_ctx);
 	}
+	mutex_unlock(&aoc_service_lock);
 }
 
 #ifdef AOC_JUNO
@@ -2291,6 +2312,13 @@ static void aoc_watchdog(struct work_struct *work)
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
 		goto err_coredump;
+	}
+
+	if (prvdata->ap_triggered_reset) {
+		prvdata->ap_triggered_reset = false;
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
+			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
+		goto coredump_submit;
 	}
 
 	ramdump_timeout = jiffies + (5 * HZ);

@@ -111,12 +111,12 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 	if (!cmd_channel || !cmd)
 		return -EINVAL;
 
-	spin_lock(&chip->audio_lock);
+	spin_lock_bh(&chip->audio_lock);
 
 	/* Get the aoc audio control channel at runtime */
 	err = alloc_aoc_audio_service(cmd_channel, &dev, NULL, NULL);
 	if (err < 0) {
-		spin_unlock(&chip->audio_lock);
+		spin_unlock_bh(&chip->audio_lock);
 		return err;
 	}
 
@@ -202,7 +202,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 exit:
 	kfree(buffer);
 	free_aoc_audio_service(cmd_channel, dev);
-	spin_unlock(&chip->audio_lock);
+	spin_unlock_bh(&chip->audio_lock);
 
 	return err < 1 ? -EAGAIN : 0;
 }
@@ -864,6 +864,22 @@ int aoc_set_usb_config(struct aoc_chip *chip)
 	return err;
 }
 
+int aoc_set_usb_config_v2(struct aoc_chip *chip)
+{
+	int err;
+	struct CMD_AUDIO_OUTPUT_USB_CONFIG_V2 cmd = chip->usb_sink_cfg_v2;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_USB_CONFIG_V2_ID, sizeof(cmd));
+
+	cmd.rx_enable = true;
+	cmd.tx_enable = true;
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	if (err < 0)
+		pr_err("Err:%d in aoc set usb config v2!\n", err);
+
+	return err;
+}
+
 static int
 aoc_audio_playback_trigger_source(struct aoc_alsa_stream *alsa_stream, int cmd,
 				  int src)
@@ -1246,16 +1262,31 @@ static int aoc_mmap_capture_trigger(struct aoc_alsa_stream *alsa_stream, int rec
 {
 	int err = 0;
 	int cmd_id;
+	struct CMD_AUDIO_INPUT_MMAP_ENABLE_2 cmd;
 	struct aoc_chip *chip = alsa_stream->chip;
 
-	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_MIC_MMAP_ENABLE_ID :
+	if (alsa_stream->channels > 2) {
+		pr_err("ERR: mmap capture channel number %d (only mono or stereo allowed)\n",
+		       alsa_stream->channels);
+		return -EINVAL;
+	}
+
+	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_MMAP_ENABLE_2_ID :
 					       CMD_AUDIO_INPUT_MIC_MMAP_DISABLE_ID;
 
-	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	if (record_cmd == START) {
+		AocCmdHdrSet(&(cmd.parent), cmd_id, sizeof(cmd));
+		cmd.chan = alsa_stream->channels;
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	} else
+		err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+
 	if (err < 0) {
-		pr_err("ERR:%d in audio mmap capture start/stop\n", err);
+		pr_err("ERR:%d in audio mmap capture %s\n", err,
+		       (record_cmd == START) ? "start" : "stop");
 		return err;
 	}
+
 	return 0;
 }
 
@@ -1263,16 +1294,31 @@ static int aoc_raw_capture_trigger(struct aoc_alsa_stream *alsa_stream, int reco
 {
 	int err = 0;
 	int cmd_id;
+	struct CMD_AUDIO_INPUT_RAW_ENABLE_2 cmd;
 	struct aoc_chip *chip = alsa_stream->chip;
 
-	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_MIC_RAW_ENABLE_ID :
-					 CMD_AUDIO_INPUT_MIC_RAW_DISABLE_ID;
+	if (alsa_stream->channels > 2) {
+		pr_err("ERR: raw capture channel number %d (only mono or stereo allowed)\n",
+		       alsa_stream->channels);
+		return -EINVAL;
+	}
 
-	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	cmd_id = (record_cmd == START) ? CMD_AUDIO_INPUT_RAW_ENABLE_2_ID :
+					       CMD_AUDIO_INPUT_MIC_RAW_DISABLE_ID;
+
+	if (record_cmd == START) {
+		AocCmdHdrSet(&(cmd.parent), cmd_id, sizeof(cmd));
+		cmd.chan = alsa_stream->channels;
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	} else
+		err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+
 	if (err < 0) {
-		pr_err("ERR:%d in audio raw capture start/stop\n", err);
+		pr_err("ERR:%d in audio raw capture %s\n", err,
+		       (record_cmd == START) ? "start" : "stop");
 		return err;
 	}
+
 	return 0;
 }
 
@@ -1956,6 +2002,7 @@ int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 	struct aoc_service_dev *dev = alsa_stream->dev;
 	void *tmp;
 	int avail;
+	uint32_t block_size;
 
 	avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
 	if (unlikely(avail < count)) {
@@ -1964,22 +2011,37 @@ int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 		err = -EFAULT;
 		goto out;
 	}
-	if (alsa_stream->substream)
-		tmp = alsa_stream->substream->runtime->dma_area;
-	else
-		tmp = alsa_stream->cstream->runtime->buffer;
 
-	err = copy_from_user(tmp, src, count);
-	if (err != 0) {
-		pr_err("ERR: %d bytes not read from user space\n", err);
-		err = -EFAULT;
-		goto out;
+	if (alsa_stream->substream) {
+		tmp = alsa_stream->substream->runtime->dma_area;
+		block_size = count;
+	} else {
+		tmp = alsa_stream->cstream->runtime->buffer;
+		block_size = alsa_stream->offload_temp_data_buf_size;
 	}
 
-	err = aoc_service_write(dev, tmp, count, NONBLOCKING);
-	if (err != count) {
-		pr_err("ERR: unwritten data - %d bytes\n", count - err);
-		err = -EFAULT;
+	while (count > 0) {
+		if (count < block_size)
+			block_size = count;
+
+		if (alsa_stream->cstream)
+			pr_debug("compr offload, count: %d, blocksize: %d\n", count, block_size);
+
+		err = copy_from_user(tmp, src, block_size);
+		if (err != 0) {
+			pr_err("ERR: %d bytes not read from user space\n", err);
+			err = -EFAULT;
+			goto out;
+		}
+
+		err = aoc_service_write(dev, tmp, block_size, NONBLOCKING);
+		if (err != block_size) {
+			pr_err("ERR: unwritten data - %d bytes\n", block_size - err);
+			err = -EFAULT;
+		}
+
+		count -= block_size;
+		src += block_size;
 	}
 
 out:

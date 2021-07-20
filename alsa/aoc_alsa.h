@@ -31,12 +31,6 @@
 #include "../aoc-interface.h"
 #include "google-aoc-enum.h"
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
-#define EXTRA_ARG_LINUX_5_9 struct snd_soc_component *component,
-#else
-#define EXTRA_ARG_LINUX_5_9
-#endif
-
 #define ALSA_AOC_CMD "alsa-aoc"
 #define CMD_INPUT_CHANNEL "audio_input_control"
 #define CMD_OUTPUT_CHANNEL "audio_output_control"
@@ -73,6 +67,7 @@
 
 #define AOC_AUDIO_SINK_BLOCK_ID_BASE 16
 #define AOC_COMPR_OFFLOAD_DEFAULT_SR 48000
+#define COMPR_OFFLOAD_KERNEL_TMP_BUF_SIZE PAGE_SIZE
 
 /* TODO: may not needed*/
 #define PLAYBACK_WATERMARK_DEFAULT 48000
@@ -123,12 +118,15 @@ enum TelephonyModes {
 
 /* AoC USB Config parameters */
 enum {
+	USB_BUS_ID,
 	USB_DEV_ID,
 	USB_TX_EP_ID,
+	USB_TX_FORMAT,
 	USB_TX_SR,
 	USB_TX_CH,
 	USB_TX_BW,
 	USB_RX_EP_ID,
+	USB_RX_FORMAT,
 	USB_RX_SR,
 	USB_RX_CH,
 	USB_RX_BW,
@@ -218,6 +216,7 @@ struct aoc_chip {
 
 	struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG a2dp_encoder_cfg;
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG usb_sink_cfg;
+	struct CMD_AUDIO_OUTPUT_USB_CONFIG_V2 usb_sink_cfg_v2;
 	struct CMD_AUDIO_OUTPUT_GET_SIDETONE sidetone_cfg;
 };
 
@@ -227,6 +226,7 @@ struct aoc_alsa_stream {
 	struct snd_compr_stream *cstream; /* compress offload stream */
 	int compr_offload_codec;
 	long compr_pcm_io_sample_base;
+	int offload_temp_data_buf_size;
 	struct timer_list timer; /* For advancing the hw ptr */
 	struct hrtimer hr_timer; /* For advancing the hw ptr */
 	unsigned long timer_interval_ns;
@@ -336,6 +336,7 @@ int aoc_get_sink_mode(struct aoc_chip *chip, int sink);
 int aoc_set_sink_mode(struct aoc_chip *chip, int sink, int mode);
 
 int aoc_set_usb_config(struct aoc_chip *chip);
+int aoc_set_usb_config_v2(struct aoc_chip *chip);
 
 int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 		    uint32_t count);
