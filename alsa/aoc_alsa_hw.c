@@ -45,7 +45,7 @@ static int hw_id_to_sink(int hw_idx)
 static int ep_id_to_source(int ep_idx)
 {
 	/* TODO: refactor needed. Haptics pcm dev id: 7, its entrypoint is 10(HAPTICS) */
-	return (ep_idx == IDX_EP8) ? HAPTICS : (ep_idx == IDX_HIFI) ? USB_HIFI : ep_idx;
+	return (ep_idx == IDX_EP8) ? HAPTICS : (ep_idx == IDX_HIFI) ? USB_HIFI : (ep_idx == IDX_US) ? SPEAKER_US : ep_idx;
 }
 
 static bool ap_filter_capture_stream(struct aoc_alsa_stream *alsa_stream)
@@ -126,7 +126,7 @@ static aoc_audio_stream_type[] = {
 	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = RAW, [11] = NORMAL,
 	[12] = NORMAL,	[13] = NORMAL, [14] = NORMAL, [15] = NORMAL, [16] = NORMAL, [17] = NORMAL,
 	[18] = INCALL,	[19] = INCALL, [20] = INCALL, [21] = INCALL, [22] = INCALL, [23] = MMAPED,
-	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,  [27] = ANDROID_AEC,
+	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,  [27] = ANDROID_AEC,	[28] = MMAPED,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
