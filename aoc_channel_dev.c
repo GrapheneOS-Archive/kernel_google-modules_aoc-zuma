@@ -35,10 +35,6 @@ static long sent_msg_count = 0;
 module_param(received_msg_count, long, S_IRUGO);
 module_param(sent_msg_count, long, S_IRUGO);
 
-struct chan_prvdata {
-	struct wakeup_source *wakelock;
-};
-
 struct aocc_device_entry {
 	struct device *aocc_device;
 	struct aoc_service_dev *service;
@@ -80,25 +76,15 @@ static struct aoc_driver aoc_chan_driver = {
 
 /* Message definitions. */
 /* TODO: These should be synchronized with EFW source. b/140593553 */
-/*
- * Maximum channel index for a 31-bit channel index value. It's set at half of
- * the actual maximum to avoid a race condition where two threads could pass the
- * maximum channel index check and then each allocate and increment the channel
- * index and push it over the maximum 31-bit value.
- */
-#define AOCC_MAX_CHANNEL_INDEX ((1 << 30) - 1)
-struct aoc_channel_message {
-	uint32_t channel_index : 31;
-	uint32_t non_wake_up : 1;
-	char payload[AOCC_MAX_MSG_SIZE - sizeof(uint32_t)];
-} __attribute__((packed));
-
 struct aoc_message_node {
 	struct list_head msg_list;
 	size_t msg_size;
 	union {
 		char msg_buffer[AOCC_MAX_MSG_SIZE];
-		struct aoc_channel_message msg;
+		struct {
+			int channel_index;
+			char payload[AOCC_MAX_MSG_SIZE - sizeof(int)];
+		} __packed;
 	};
 };
 
@@ -147,14 +133,12 @@ static int aocc_demux_kthread(void *data)
 	ssize_t retval = 0;
 	int rc = 0;
 	struct aoc_service_dev *service = (struct aoc_service_dev *)data;
-	struct chan_prvdata *service_prvdata = service->prvdata;
 
 	pr_info("Demux handler started!");
 
 	while (!kthread_should_stop()) {
 		int handler_found = 0;
 		int channel = 0;
-		bool take_wake_lock = false;
 		struct file_prvdata *entry;
 		struct aoc_message_node *node =
 			kmalloc(sizeof(struct aoc_message_node), GFP_KERNEL);
@@ -194,16 +178,13 @@ static int aocc_demux_kthread(void *data)
 
 		received_msg_count++;
 		node->msg_size = retval;
-		channel = node->msg.channel_index;
+		channel = node->channel_index;
 
 		/* Find the open file with the correct matching ID. */
 		mutex_lock(&s_open_files_lock);
 		list_for_each_entry(entry, &s_open_files, open_files_list) {
 			if (channel == entry->channel_index) {
 				handler_found = 1;
-				if (!node->msg.non_wake_up) {
-					take_wake_lock = true;
-				}
 
 				if (atomic_read(&entry->pending_msg_count) >
 				    AOCC_MAX_PENDING_MSGS) {
@@ -235,11 +216,6 @@ static int aocc_demux_kthread(void *data)
 			}
 		}
 		mutex_unlock(&s_open_files_lock);
-
-		/* Take a wakelock to allow the queue to drain. */
-		if (take_wake_lock) {
-			pm_wakeup_ws_event(service_prvdata->wakelock, 200, true);
-		}
 
 		if (!handler_found) {
 			pr_warn_ratelimited("Could not find handler for channel %d",
@@ -415,7 +391,7 @@ static int aocc_open(struct inode *inode, struct file *file)
 	}
 
 	/* Check if our simple allocation scheme has overflowed */
-	if (atomic_read(&channel_index_counter) >= AOCC_MAX_CHANNEL_INDEX) {
+	if (atomic_read(&channel_index_counter) == 0) {
 		pr_err("Too many channels have been opened.");
 		rc = -EMFILE;
 		mutex_unlock(&aocc_devices_lock);
@@ -581,7 +557,7 @@ static ssize_t aocc_read(struct file *file, char __user *buf, size_t count,
 	}
 
 	/* copy message payload to userspace, minus the channel ID */
-	retval = copy_to_user(buf, node->msg.payload, node->msg_size - sizeof(uint32_t));
+	retval = copy_to_user(buf, node->payload, node->msg_size - sizeof(int));
 
 	/* copy_to_user returns bytes that couldn't be copied */
 	retval = node->msg_size - retval;
@@ -751,7 +727,6 @@ static void aocc_sh_mem_doorbell_probe(struct aoc_service_dev *dev)
 
 static int aocc_probe(struct aoc_service_dev *dev)
 {
-	struct chan_prvdata *prvdata;
 	int ret = 0;
 	struct sched_param param = {
 		.sched_priority = 10,
@@ -759,14 +734,7 @@ static int aocc_probe(struct aoc_service_dev *dev)
 
 	pr_notice("probe service with name %s\n", dev_name(&dev->dev));
 
-	prvdata = devm_kzalloc(&dev->dev, sizeof(*prvdata), GFP_KERNEL);
-	if (!prvdata)
-		return -ENOMEM;
-
 	if (strcmp(dev_name(&dev->dev), "usf_sh_mem_doorbell") != 0) {
-		prvdata->wakelock = wakeup_source_register(&dev->dev, dev_name(&dev->dev));
-		dev->prvdata = prvdata;
-
 		ret = create_character_device(dev);
 
 		s_demux_task = kthread_run(&aocc_demux_kthread, dev,
@@ -787,7 +755,6 @@ static int aocc_remove(struct aoc_service_dev *dev)
 {
 	struct aocc_device_entry *entry;
 	struct aocc_device_entry *tmp;
-	struct chan_prvdata *prvdata;
 
 	if (dev != sh_mem_doorbell_service_dev) {
 		kthread_stop(s_demux_task);
@@ -797,12 +764,6 @@ static int aocc_remove(struct aoc_service_dev *dev)
 	if (dev == sh_mem_doorbell_service_dev) {
 		sh_mem_doorbell_service_dev->handler = NULL;
 		sh_mem_doorbell_service_dev = NULL;
-	} else {
-		prvdata = dev->prvdata;
-		if (prvdata->wakelock) {
-			wakeup_source_unregister(prvdata->wakelock);
-			prvdata->wakelock = NULL;
-		}
 	}
 
 	mutex_lock(&aocc_devices_lock);

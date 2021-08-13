@@ -13,24 +13,8 @@
 #include <linux/platform_device.h>
 #include <linux/version.h>
 
-#include <trace/hooks/snd_compr.h>
-
 #include "aoc_alsa.h"
 #include "aoc_alsa_drv.h"
-
-static void aoc_stop_work_handler(struct work_struct *work);
-
-static void vh_ep_use_pause_in_drain(void *data, bool *use_pause_in_drain, bool *leave_draining)
-{
-	*use_pause_in_drain = true;
-	*leave_draining = true;
-}
-
-static int aoc_compr_vh_snd_compr_init()
-{
-	return register_trace_android_vh_snd_compr_use_pause_in_drain(vh_ep_use_pause_in_drain,
-									NULL);
-}
 
 static void aoc_compr_reset_handler(aoc_aud_service_event_t evnt, void *cookies)
 {
@@ -49,10 +33,7 @@ static void aoc_compr_reset_handler(aoc_aud_service_event_t evnt, void *cookies)
 		 * still return error since AOC isn't ready. Most of alsa stream tasks from
 		 * user-space will be returned by xrun state.
 		 */
-		alsa_stream->cstream->runtime->state = SNDRV_PCM_STATE_XRUN;
-		wake_up(&alsa_stream->cstream->runtime->sleep);
-
-		schedule_work(&alsa_stream->free_aoc_service_work);
+		snd_compr_stop_error(alsa_stream->cstream, SNDRV_PCM_STATE_XRUN);
 		return;
 	}
 }
@@ -234,37 +215,6 @@ static int aoc_compr_prepare(struct aoc_alsa_stream *alsa_stream)
 	return 0;
 }
 
-static void aoc_stop_work_handler(struct work_struct *work)
-{
-	struct aoc_alsa_stream *alsa_stream =
-		container_of(work, struct aoc_alsa_stream, free_aoc_service_work);
-	struct aoc_chip *chip;
-	int err;
-
-	if (!alsa_stream)
-		return;
-
-	chip = alsa_stream->chip;
-	if (mutex_lock_interruptible(&chip->audio_mutex)) {
-		pr_err("ERR: interrupted while waiting for lock\n");
-		return;
-	}
-
-	if (alsa_stream->running) {
-		err = aoc_audio_stop(alsa_stream);
-		if (err != 0) {
-			pr_err("failed to STOP alsa device (%d)\n",
-			       err);
-		}
-		alsa_stream->running = 0;
-	}
-
-	aoc_timer_stop(alsa_stream);
-	aoc_compr_prepare(alsa_stream);
-	mutex_unlock(&chip->audio_mutex);
-	return;
-}
-
 static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd =
@@ -296,8 +246,6 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 		pr_err("ERR: no memory for %s", rtd->dai_link->name);
 		goto out;
 	}
-
-	INIT_WORK(&alsa_stream->free_aoc_service_work, aoc_stop_work_handler);
 
 	/* Find the corresponding aoc audio service */
 	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, aoc_compr_reset_handler,
@@ -384,7 +332,6 @@ static int aoc_compr_playback_free(struct snd_compr_stream *cstream)
 	pr_debug("dai name %s, cstream %pK\n", rtd->dai_link->name, cstream);
 	aoc_timer_stop_sync(alsa_stream);
 
-	cancel_work_sync(&alsa_stream->free_aoc_service_work);
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		pr_err("ERR: interrupted while waiting for lock\n");
 		return -EINTR;
@@ -424,7 +371,7 @@ static int aoc_compr_playback_free(struct snd_compr_stream *cstream)
 	return 0;
 }
 
-static int aoc_compr_open(struct snd_soc_component *component, struct snd_compr_stream *cstream)
+static int aoc_compr_open(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream)
 {
 	int ret = 0;
 	if (cstream->direction == SND_COMPRESS_PLAYBACK)
@@ -433,7 +380,7 @@ static int aoc_compr_open(struct snd_soc_component *component, struct snd_compr_
 	return ret;
 }
 
-static int aoc_compr_free(struct snd_soc_component *component, struct snd_compr_stream *cstream)
+static int aoc_compr_free(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream)
 {
 	int ret = 0;
 	if (cstream->direction == SND_COMPRESS_PLAYBACK)
@@ -442,8 +389,7 @@ static int aoc_compr_free(struct snd_soc_component *component, struct snd_compr_
 	return ret;
 }
 
-static int aoc_compr_trigger(struct snd_soc_component *component, struct snd_compr_stream *cstream,
-			     int cmd)
+static int aoc_compr_trigger(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream, int cmd)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
@@ -531,7 +477,7 @@ out:
 	return err;
 }
 
-static int aoc_compr_pointer(struct snd_soc_component *component, struct snd_compr_stream *cstream,
+static int aoc_compr_pointer(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
 			     struct snd_compr_tstamp *arg)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
@@ -556,8 +502,7 @@ static int aoc_compr_pointer(struct snd_soc_component *component, struct snd_com
 	return 0;
 }
 
-static int aoc_compr_ack(struct snd_soc_component *component, struct snd_compr_stream *cstream,
-			 size_t count)
+static int aoc_compr_ack(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream, size_t count)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 
@@ -582,8 +527,8 @@ static int aoc_compr_playback_copy(struct snd_compr_stream *cstream,
 	return count;
 }
 
-static int aoc_compr_copy(struct snd_soc_component *component, struct snd_compr_stream *cstream,
-			  char __user *buf, size_t count)
+static int aoc_compr_copy(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream, char __user *buf,
+			  size_t count)
 {
 	int ret = 0;
 
@@ -593,7 +538,7 @@ static int aoc_compr_copy(struct snd_soc_component *component, struct snd_compr_
 	return ret;
 }
 
-static int aoc_compr_get_caps(struct snd_soc_component *component, struct snd_compr_stream *cstream,
+static int aoc_compr_get_caps(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
 			      struct snd_compr_caps *arg)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
@@ -604,8 +549,7 @@ static int aoc_compr_get_caps(struct snd_soc_component *component, struct snd_co
 	return ret;
 }
 
-static int aoc_compr_get_codec_caps(struct snd_soc_component *component,
-				    struct snd_compr_stream *cstream,
+static int aoc_compr_get_codec_caps(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
 				    struct snd_compr_codec_caps *codec)
 {
 	pr_debug("%s, %d\n", __func__, codec->codec);
@@ -624,8 +568,7 @@ static int aoc_compr_get_codec_caps(struct snd_soc_component *component,
 	return 0;
 }
 
-static int aoc_compr_set_metadata(struct snd_soc_component *component,
-				  struct snd_compr_stream *cstream,
+static int aoc_compr_set_metadata(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
 				  struct snd_compr_metadata *metadata)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
@@ -636,8 +579,7 @@ static int aoc_compr_set_metadata(struct snd_soc_component *component,
 	return ret;
 }
 
-static int aoc_compr_get_metadata(struct snd_soc_component *component,
-				  struct snd_compr_stream *cstream,
+static int aoc_compr_get_metadata(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
 				  struct snd_compr_metadata *metadata)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
@@ -648,32 +590,30 @@ static int aoc_compr_get_metadata(struct snd_soc_component *component,
 	return ret;
 }
 
-static int aoc_compr_set_params(struct snd_soc_component *component,
-				struct snd_compr_stream *cstream, struct snd_compr_params *params)
+static int aoc_compr_set_params(EXTRA_ARG_LINUX_5_9 struct snd_compr_stream *cstream,
+				struct snd_compr_params *params)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
 
-	uint8_t *temp_data_buf;
+	uint8_t *buffer;
 	int buffer_size;
 
 	pr_debug("%s, fragment size = %d, number of fragment = %d\n", __func__,
 		 params->buffer.fragment_size, params->buffer.fragments);
 
-	/* DRAM compr offload buffer size in runtime */
+	/* Memory allocation in runtime, based on segment size and the number of segment */
 	buffer_size = params->buffer.fragment_size * params->buffer.fragments;
 
 	pr_debug("%s buffer size: %d\n", __func__, buffer_size);
 
-	alsa_stream->offload_temp_data_buf_size = COMPR_OFFLOAD_KERNEL_TMP_BUF_SIZE;
-	temp_data_buf = kmalloc_array(alsa_stream->offload_temp_data_buf_size,
-				      sizeof(*temp_data_buf), GFP_KERNEL);
-	if (!temp_data_buf) {
-		pr_err("ERR: not enough memory allocated for compress offload\n");
+	buffer = kmalloc_array(buffer_size, sizeof(*buffer), GFP_KERNEL);
+	if (!buffer) {
+		pr_err("ERR: no memory\n");
 		return -ENOMEM;
 	}
 
-	runtime->buffer = temp_data_buf;
+	runtime->buffer = buffer;
 	alsa_stream->buffer_size = buffer_size;
 	alsa_stream->period_size = params->buffer.fragment_size;
 	alsa_stream->params_rate = params->codec.sample_rate;
@@ -704,7 +644,7 @@ static const struct snd_compr_ops snd_aoc_compr_ops = {
 	.get_codec_caps = aoc_compr_get_codec_caps,
 };
 
-static int aoc_compr_new(struct snd_soc_component *component, struct snd_soc_pcm_runtime *rtd)
+static int aoc_compr_new(EXTRA_ARG_LINUX_5_9 struct snd_soc_pcm_runtime *rtd)
 {
 	pr_debug("%s, %pK", __func__, rtd);
 
@@ -783,7 +723,6 @@ int aoc_compr_init(void)
 		return err;
 	}
 
-	aoc_compr_vh_snd_compr_init();
 	return 0;
 }
 

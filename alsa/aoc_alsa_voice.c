@@ -63,8 +63,7 @@ static void snd_aoc_pcm_free(struct snd_pcm_runtime *runtime)
 }
 
 /* PCM open callback */
-static int snd_aoc_pcm_open(struct snd_soc_component *component,
-			    struct snd_pcm_substream *substream)
+static int snd_aoc_pcm_open(EXTRA_ARG_LINUX_5_9 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd =
 		(struct snd_soc_pcm_runtime *)substream->private_data;
@@ -144,8 +143,7 @@ out:
 
 
 /* Close callback */
-static int snd_aoc_pcm_close(struct snd_soc_component *component,
-			     struct snd_pcm_substream *substream)
+static int snd_aoc_pcm_close(EXTRA_ARG_LINUX_5_9  struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -208,8 +206,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 }
 
 /* PCM hw_params callback */
-static int snd_aoc_pcm_hw_params(struct snd_soc_component *component,
-				 struct snd_pcm_substream *substream,
+static int snd_aoc_pcm_hw_params(EXTRA_ARG_LINUX_5_9  struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -236,15 +233,13 @@ static int snd_aoc_pcm_hw_params(struct snd_soc_component *component,
 }
 
 /* PCM hw_free callback */
-static int snd_aoc_pcm_hw_free(struct snd_soc_component *component,
-			       struct snd_pcm_substream *substream)
+static int snd_aoc_pcm_hw_free(EXTRA_ARG_LINUX_5_9  struct snd_pcm_substream *substream)
 {
 	return snd_pcm_lib_free_pages(substream);
 }
 
 /* PCM prepare callback */
-static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
-			       struct snd_pcm_substream *substream)
+static int snd_aoc_pcm_prepare(EXTRA_ARG_LINUX_5_9  struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
@@ -290,7 +285,7 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 	return err;
 }
 
-static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_runtime *rtd)
+static int aoc_pcm_new(EXTRA_ARG_LINUX_5_9 struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_pcm_substream *substream = NULL;
 	/* Allocate DMA memory */

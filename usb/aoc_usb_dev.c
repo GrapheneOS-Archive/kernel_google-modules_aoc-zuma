@@ -124,14 +124,15 @@ static int aoc_usb_set_dcbaa_ptr(struct aoc_usb_drvdata *drvdata,
 				 u64 *aoc_dcbaa_ptr)
 {
 	int ret = 0;
-	struct CMD_USB_CONTROL_SET_DCBAA_PTR *cmd;
+	struct CMD_USB_CONTROL_GET_DCBAA_PTR *cmd;
 
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_DCBAA_PTR), GFP_KERNEL);
+	// TODO(b/192858107): Create a CMD_USB_CONTROL_SET_DCBAA_PTR instead.
+	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_GET_DCBAA_PTR), GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
 
 	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_SET_DCBAA_PTR_ID,
+		     CMD_USB_CONTROL_GET_DCBAA_PTR_ID,
 		     sizeof(*cmd));
 
 	cmd->aoc_dcbaa_ptr = *aoc_dcbaa_ptr;
@@ -177,32 +178,22 @@ static int aoc_usb_setup_done(struct aoc_usb_drvdata *drvdata)
 	return 0;
 }
 
-static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, void *data)
+static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, u32 *conn_state)
 {
 	int ret = 0;
-	struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2 *cmd;
-	struct conn_stat_args *args = data;
+	struct CMD_USB_CONTROL_NOTIFY_CONN_STAT *cmd;
 
-	if (args->conn_stat)
-		drvdata->usb_conn_state++;
-	else
-		drvdata->usb_conn_state--;
+	drvdata->usb_conn_state = *conn_state;
 
-	dev_dbg(&drvdata->adev->dev, "currently connected usb audio device count = %u\n",
-		drvdata->usb_conn_state);
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2), GFP_KERNEL);
+	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_NOTIFY_CONN_STAT), GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
 
 	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2_ID,
+		     CMD_USB_CONTROL_NOTIFY_CONN_STAT_ID,
 		     sizeof(*cmd));
 
-	cmd->bus_id = args->bus_id;
-	cmd->dev_num = args->dev_num;
-	cmd->slot_id = args->slot_id;
-	cmd->conn_state = args->conn_stat;
+	cmd->conn_state = *conn_state;
 
 	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
 	if (ret < 0) {
@@ -257,14 +248,15 @@ static int aoc_usb_set_isoc_tr_info(struct aoc_usb_drvdata *drvdata, void *args)
 	int ret;
 	struct get_isoc_tr_info_args *tr_info_args =
 		(struct get_isoc_tr_info_args *)args;
-	struct CMD_USB_CONTROL_SET_ISOC_TR_INFO *cmd;
+	struct CMD_USB_CONTROL_GET_ISOC_TR_INFO *cmd;
 
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_ISOC_TR_INFO), GFP_KERNEL);
+	// TODO(b/192858107): Create a CMD_USB_CONTROL_SET_ISOC_TR_INFO instead.
+	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_GET_ISOC_TR_INFO), GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
 
 	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_SET_ISOC_TR_INFO_ID,
+		     CMD_USB_CONTROL_GET_ISOC_TR_INFO_ID,
 		     sizeof(*cmd));
 
 	cmd->ep_id = tr_info_args->ep_id;
@@ -370,7 +362,6 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 	if (!drvdata->ws)
 		return -ENOMEM;
 
-	drvdata->usb_conn_state = 0;
 	drvdata->service_timeout = msecs_to_jiffies(100);
 	drvdata->nb.notifier_call = aoc_usb_notify;
 	register_aoc_usb_notifier(&drvdata->nb);
