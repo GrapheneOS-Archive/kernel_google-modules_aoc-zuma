@@ -2000,10 +2000,15 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping mailboxes failed\n"); */
 
-	/* Map in USB for low power audio */
-	/* if (iommu_map(domain, 0x9E500000, 0x11100000, SZ_1M,
+	/* Map in the xhci_dma carveout */
+	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
 		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping usb failed\n"); */
+		dev_err(dev, "mapping xhci_dma carveout failed\n");
+
+	/* Map in USB for low power audio */
+	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping usb failed\n");
 
 	/* Map in modem registers */
 	/* if (iommu_map(domain, 0x9E600000, 0x40000000, SZ_1M,
