@@ -2308,6 +2308,15 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
 
+#if IS_ENABLED(CONFIG_SOC_GS201)
+	dev_err(prvdata->dev, "aoc watchdog triggered.  Sensors and audio will be gone until reboot\n");
+	mutex_lock(&aoc_service_lock);
+	aoc_take_offline(prvdata);
+	mutex_unlock(&aoc_service_lock);
+
+	return;
+#endif
+
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
