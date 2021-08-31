@@ -2217,6 +2217,18 @@ int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
 	cmd.ch_gains[0] = val[0];
 	cmd.ch_gains[1] = val[1];
 
+	if (val[0] == 0 && val[1] == 0) {
+		err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL,
+						CMD_AUDIO_OUTPUT_DEC_RESET_CURRENT_GAIN_ID,
+						chip);
+		if (err < 0) {
+			pr_err("ERR:%d in aoc compr reset gain\n", err);
+			return err;
+		}
+		/* To allow the reset finished in aoc */
+		msleep(100);
+	}
+
 	/* Send cmd to AOC */
 	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
 	if (err < 0) {
