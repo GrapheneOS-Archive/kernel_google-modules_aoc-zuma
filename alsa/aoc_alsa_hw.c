@@ -3185,3 +3185,18 @@ int aoc_a2dp_set_enc_param(struct aoc_chip *chip, struct AUDIO_OUTPUT_BT_A2DP_EN
 	return err;
 }
 
+int aoc_audio_us_record(struct aoc_chip *chip, bool enable)
+{
+	int cmd_id, err = 0;
+
+	cmd_id = enable ? CMD_AUDIO_INPUT_DIRECT_ULTRASONIC_CAPTURE_ENABLE_ID:
+				CMD_AUDIO_INPUT_DIRECT_ULTRASONIC_CAPTURE_DISABLE_ID;
+
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	if (err < 0)
+		pr_err("ERR:%d in ultra sonic record %s control\n",
+			err, enable ? "start":"stop");
+
+	return err;
+}
+
