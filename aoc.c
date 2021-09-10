@@ -177,6 +177,7 @@ struct aoc_prvdata {
 	u32 enable_uart_tx;
 	u32 force_voltage_nominal;
 	u32 no_ap_resets;
+	u32 force_speaker_ultrasonic;
 
 	u32 total_coredumps;
 	u32 total_restarts;
@@ -769,6 +770,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_vnom = ((dt_force_vnom != 0) || (prvdata->force_voltage_nominal != 0)) ? 1 : 0;
 	u32 disable_mm = prvdata->disable_monitor_mode;
 	u32 enable_uart = prvdata->enable_uart_tx;
+	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
@@ -790,7 +792,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCCaptureHeapSize, .value = CAPTURE_HEAP_SIZE },
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
-		{ .key = kAOCEnableUART, .value = enable_uart }
+		{ .key = kAOCEnableUART, .value = enable_uart },
+		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic }
 	};
 	const char *version;
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
@@ -845,6 +848,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	if (prvdata->no_ap_resets)
 		dev_err(dev, "Resets by AP via sysfs are disabled\n");
+
+	if (prvdata->force_speaker_ultrasonic)
+		dev_err(dev, "Forcefully enabling Speaker Ultrasonic pipeline\n");
 
 	if (!_aoc_fw_is_compatible(fw)) {
 		dev_err(dev, "firmware and drivers are incompatible\n");
@@ -2784,6 +2790,23 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		prvdata->enable_uart_tx = enable_uart;
 		if (prvdata->enable_uart_tx != 0)
 			pr_info("AoC UART Logging Enabled\n");
+
+		ret = 0;
+	}
+	break;
+
+	case AOC_IOCTL_FORCE_SPEAKER_ULTRASONIC:
+	{
+		u32 force_sprk_ultrasonic;
+
+		BUILD_BUG_ON(sizeof(force_sprk_ultrasonic) != _IOC_SIZE(AOC_IOCTL_FORCE_SPEAKER_ULTRASONIC));
+
+		if (copy_from_user(&force_sprk_ultrasonic, (u32 *)arg, _IOC_SIZE(cmd)))
+			break;
+
+		prvdata->force_speaker_ultrasonic = force_sprk_ultrasonic;
+		if (prvdata->force_speaker_ultrasonic != 0)
+			pr_info("AoC Forcefully enabling Speaker Ultrasonic pipeline\n");
 
 		ret = 0;
 	}

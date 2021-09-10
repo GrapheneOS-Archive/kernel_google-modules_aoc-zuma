@@ -134,6 +134,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCPlaybackHeapSize = 0x100D,
 	kAOCCaptureHeapAddress = 0x100E,
 	kAOCCaptureHeapSize = 0x100F,
+	kAOCForceSpeakerUltrasonic = 0x1010,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \
