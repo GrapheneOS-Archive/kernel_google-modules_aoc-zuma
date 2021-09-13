@@ -1415,6 +1415,25 @@ static int a2dp_encoder_parameters_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int us_record_ctl_get(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int us_record_ctl_set(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	aoc_audio_us_record(chip, ucontrol->value.integer.value[0]);
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 /* TODO: this has to be consistent to enum APMicProcessIndex in aoc-interface.h */
 static const char *builtin_mic_process_mode_texts[] = { "Raw", "Spatial" };
 static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
@@ -1690,6 +1709,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("Incall Playback1 Mic Channel", SND_SOC_NOPM, 1, 2, 0, incall_playback_mic_channel_ctl_get,
 		       incall_playback_mic_channel_ctl_set),
 
+
+	/* UltraSonic Record enable */
+	SOC_SINGLE_EXT("US Record Enable", SND_SOC_NOPM, 0, 1, 0,
+		       us_record_ctl_get, us_record_ctl_set),
 
 	/* LVM enable 1/0 for comp offload */
 	SOC_SINGLE_EXT("LVM Enable", SND_SOC_NOPM, 0, 1, 0,

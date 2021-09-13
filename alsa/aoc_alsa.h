@@ -404,4 +404,6 @@ int aoc_incall_init(void);
 void aoc_incall_exit(void);
 int aoc_voip_init(void);
 void aoc_voip_exit(void);
+
+int aoc_audio_us_record(struct aoc_chip *chip, bool enable);
 #endif
