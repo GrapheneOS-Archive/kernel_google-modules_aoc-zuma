@@ -67,6 +67,9 @@
 /* This should not be required, as we expect only one of the two to be defined */
 #if IS_ENABLED(CONFIG_SOC_GS201)
     #undef CONFIG_SOC_GS101
+    #define AOC_PLATFORM_SUPPORTS_RESTART 0
+#else
+    #define AOC_PLATFORM_SUPPORTS_RESTART 1
 #endif
 
 #if IS_ENABLED(CONFIG_SOC_GS201) && IS_ENABLED(CONFIG_SOC_GS101)
@@ -1687,6 +1690,11 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
 	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
+#if AOC_PLATFORM_SUPPORTS_RESTART != 1
+	dev_err(dev, "Platform does not support AoC restart");
+	return -EINVAL;
+#endif
+
 	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
@@ -2312,7 +2320,7 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
 
-#if IS_ENABLED(CONFIG_SOC_GS201)
+#if AOC_PLATFORM_SUPPORTS_RESTART != 1
 	dev_err(prvdata->dev, "aoc watchdog triggered.  Sensors and audio will be gone until reboot\n");
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
