@@ -32,6 +32,7 @@
 #include <linux/moduleparam.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/platform_data/sscoredump.h>
 #include <linux/platform_device.h>
@@ -157,6 +158,8 @@ struct aoc_prvdata {
 
 	u32 total_coredumps;
 	u32 total_restarts;
+	unsigned int sysmmu_nonsecure_irq;
+	unsigned int sysmmu_secure_irq;
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
 	struct notifier_block itmon_nb;
@@ -769,9 +772,6 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		  version ? version : "unknown",
 		  _aoc_fw_is_release(fw) ? "release" : "development");
 
-	if (sram_was_repaired)
-		dev_err(dev, "SRAM was repaired on this device.  Stability/power will be impacted\n");
-
 	if (prvdata->disable_monitor_mode)
 		dev_err(dev, "Monitor Mode will be disabled.  Power will be impacted\n");
 
@@ -812,6 +812,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
 		prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
 		aoc_a32_reset();
+		enable_irq(prvdata->watchdog_irq);
+
 		msleep(2000);
 		dev_info(dev, "re-enabling SICD\n");
 		enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
@@ -846,6 +848,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 			goto free_fw;
 		}
 
+		enable_irq(prvdata->watchdog_irq);
 		aoc_state = AOC_STATE_FIRMWARE_LOADED;
 
 		msleep(2000);
@@ -1354,6 +1357,8 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	}
 
 	aoc_reset_successful = false;
+	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
+	disable_irq_nosync(prvdata->sysmmu_secure_irq);
 	for (i = 0; i < aoc_reset_tries; i++) {
 		dev_info(prvdata->dev, "resetting aoc\n");
 		writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
@@ -1382,6 +1387,8 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 			break;
 		}
 	}
+	enable_irq(prvdata->sysmmu_nonsecure_irq);
+	enable_irq(prvdata->sysmmu_secure_irq);
 	if (!aoc_reset_successful) {
 		/* Trigger acpm ramdump since we timed out the aoc reset request */
 		dbg_snapshot_emergency_reboot("AoC Restart timed out");
@@ -1415,7 +1422,6 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 		return rc;
 	}
 
-	enable_irq(prvdata->watchdog_irq);
 	return rc;
 }
 
@@ -2660,7 +2666,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct aoc_prvdata *prvdata = NULL;
-	struct device_node *aoc_node, *mem_node;
+	struct device_node *aoc_node, *mem_node, *sysmmu_node;
 	struct resource *rsrc;
 	unsigned int acpm_async_size;
 	int ret;
@@ -2767,13 +2773,35 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	}
 
 	ret = devm_request_irq(dev, prvdata->watchdog_irq, watchdog_int_handler,
-			       IRQF_TRIGGER_HIGH, dev_name(dev), dev);
+			       IRQF_TRIGGER_HIGH | IRQ_NOAUTOEN, dev_name(dev), dev);
 	if (ret != 0) {
 		dev_err(dev, "failed to register watchdog irq handler: %d\n",
 			ret);
 		rc = -EIO;
 		goto err_watchdog_irq_req;
 	}
+
+	sysmmu_node = of_parse_phandle(aoc_node, "iommus", 0);
+	if (!sysmmu_node) {
+		dev_err(dev, "failed to find sysmmu device tree node\n");
+		rc = -ENODEV;
+		goto err_watchdog_sysmmu_irq;
+	}
+	ret = of_irq_get(sysmmu_node, 0);
+	if (ret < 0) {
+		dev_err(dev, "failed to find sysmmu non-secure irq: %d\n", ret);
+		rc = ret;
+		goto err_watchdog_sysmmu_irq;
+	}
+	prvdata->sysmmu_nonsecure_irq = ret;
+	ret = of_irq_get(sysmmu_node, 1);
+	if (ret < 0) {
+		dev_err(dev, "failed to find sysmmu secure irq: %d\n", ret);
+		rc = ret;
+		goto err_watchdog_sysmmu_irq;
+	}
+	prvdata->sysmmu_secure_irq = ret;
+	of_node_put(sysmmu_node);
 #endif
 
 	pr_notice("found aoc with interrupt:%d sram:%pR dram:%pR\n", aoc_irq,
@@ -2905,6 +2933,7 @@ err_s2mpu_map:
 err_sram_dram_map:
 
 #ifndef AOC_JUNO
+err_watchdog_sysmmu_irq:
 err_watchdog_irq_req:
 err_watchdog_irq_get:
 #else
