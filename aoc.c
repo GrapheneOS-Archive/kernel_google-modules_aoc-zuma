@@ -906,7 +906,6 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 	struct aoc_prvdata *prvdata;
 	aoc_service *service;
 	void *ring_base;
-	int service_number;
 
 	if (!dev)
 		return -EINVAL;
@@ -914,7 +913,6 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
 
-	service_number = dev->service_index;
 	service = service_at_index(prvdata, dev->service_index);
 
 	ring_base = aoc_service_ring_base(service, prvdata->ipc_base, dir);
