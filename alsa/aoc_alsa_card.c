@@ -1219,8 +1219,9 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 
 	daifmt = of_get_child_by_name(node, "daifmt");
 	if (daifmt) {
-		dai->dai_fmt =
-			snd_soc_of_parse_daifmt(daifmt, NULL, NULL, NULL);
+		dai->dai_fmt = snd_soc_daifmt_parse_format(daifmt, NULL);
+		dai->dai_fmt |=
+			snd_soc_daifmt_parse_clock_provider_as_flag(daifmt, NULL);
 		of_node_put(daifmt);
 		pr_debug("%s: daifmt 0x%x for %s", __func__, dai->dai_fmt,
 			dai->name);
