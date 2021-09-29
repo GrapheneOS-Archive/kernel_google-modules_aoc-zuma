@@ -685,6 +685,10 @@ static u32 aoc_board_config_parse(struct device_node *node, u32 *board_id, u32 *
 			*board_id  = 0x30101;
 			*board_rev = 0x10000;
 			pr_info("AoC Platform: CR");
+		} else if (strncmp(board_cfg, "rc", 2) == 0) {
+			*board_id  = 0x30201;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: RavenClaw");
 		} else if (strncmp(board_cfg, "C10", 3) == 0) {
 			*board_id  = 0x30301;
 			*board_rev = 0x10000;
