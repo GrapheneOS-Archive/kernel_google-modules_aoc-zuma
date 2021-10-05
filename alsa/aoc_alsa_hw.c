@@ -1590,8 +1590,10 @@ static int aoc_audio_capture_set_params(struct aoc_alsa_stream *alsa_stream,
 	/* TODO: update this after DSP supports the runtime configuration */
 	cmd.pdm_mask = 0;
 	for (i = 0; i < ARRAY_SIZE(chip->buildin_mic_id_list); i++) {
+		cmd.interleaving[i] = 0xff;
 		mic_id = chip->buildin_mic_id_list[i];
 		if (mic_id != -1) {
+			cmd.interleaving[i] = mic_id;
 			cmd.pdm_mask = cmd.pdm_mask | (1 << mic_id);
 		}
 	}
