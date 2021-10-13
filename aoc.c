@@ -1407,6 +1407,7 @@ static bool aoc_a32_reset(void)
 	return true;
 }
 
+__attribute__((unused))
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 {
 	/* 4100 * 0.244 us * 100 = 100 ms */
@@ -2334,15 +2335,6 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
 
-#if AOC_PLATFORM_SUPPORTS_RESTART != 1
-	dev_err(prvdata->dev, "aoc watchdog triggered.  Sensors and audio will be gone until reboot\n");
-	mutex_lock(&aoc_service_lock);
-	aoc_take_offline(prvdata);
-	mutex_unlock(&aoc_service_lock);
-
-	return;
-#endif
-
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
@@ -2447,11 +2439,16 @@ err_coredump:
 
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
+#if AOC_PLATFORM_SUPPORTS_RESTART != 1
+	dev_err(prvdata->dev, "aoc watchdog triggered.  Sensors and audio will be gone until reboot\n");
+    (void)restart_rc;
+#else
 	restart_rc = aoc_watchdog_restart(prvdata);
 	if (restart_rc)
 		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
 	else
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+#endif
 	mutex_unlock(&aoc_service_lock);
 }
 
