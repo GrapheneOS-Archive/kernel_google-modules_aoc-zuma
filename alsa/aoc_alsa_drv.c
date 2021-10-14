@@ -50,6 +50,7 @@ static const char *const audio_service_names[] = {
 	"audio_voip_tx",
 	"audio_incall_pb_0",
 	"audio_incall_pb_1",
+	"audio_incall_pb_2",
 	"audio_incall_cap_0",
 	"audio_incall_cap_1",
 	"audio_incall_cap_2",

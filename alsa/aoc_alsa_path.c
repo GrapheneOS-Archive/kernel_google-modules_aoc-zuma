@@ -275,6 +275,22 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 
 	{
 		.playback = {
+			.stream_name = "audio_incall_pb_2",
+			.rates = SNDRV_PCM_RATE_8000_48000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+					SNDRV_PCM_FMTBIT_S24_LE |
+					SNDRV_PCM_FMTBIT_S24_3LE |
+					SNDRV_PCM_FMTBIT_FLOAT_LE |
+					SNDRV_PCM_FMTBIT_S32_LE,
+			.channels_min = 1,
+			.channels_max = 4,
+		},
+		.name = "audio_incall_pb_2",
+		.id = IDX_INCALL_PB2_RX,
+	},
+
+	{
+		.playback = {
 			.stream_name = "audio_raw",
 			.rates = SNDRV_PCM_RATE_48000,
 			.formats = SNDRV_PCM_FMTBIT_S32_LE,
