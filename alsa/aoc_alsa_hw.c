@@ -122,11 +122,12 @@ static int hw_id_to_phone_mic_source(int hw_id)
 
 /* temp usage */
 static aoc_audio_stream_type[] = {
-	[0] = MMAPED,	[1] = NORMAL,  [2] = NORMAL,  [3] = NORMAL,  [4] = NORMAL,  [5] = NORMAL,
-	[6] = COMPRESS, [7] = NORMAL,  [8] = NORMAL,  [9] = MMAPED,  [10] = RAW, [11] = NORMAL,
-	[12] = NORMAL,	[13] = NORMAL, [14] = NORMAL, [15] = NORMAL, [16] = NORMAL, [17] = NORMAL,
-	[18] = INCALL,	[19] = INCALL, [20] = INCALL, [21] = INCALL, [22] = INCALL, [23] = MMAPED,
-	[24] = NORMAL,	[25] = HIFI,	[26] = HIFI,  [27] = ANDROID_AEC,	[28] = MMAPED,
+	[0] = MMAPED,  [1] = NORMAL,   [2] = NORMAL,	   [3] = NORMAL,  [4] = NORMAL,
+	[5] = NORMAL,  [6] = COMPRESS, [7] = NORMAL,	   [8] = NORMAL,  [9] = MMAPED,
+	[10] = RAW,    [11] = NORMAL,  [12] = NORMAL,	   [13] = NORMAL, [14] = NORMAL,
+	[15] = NORMAL, [16] = NORMAL,  [17] = NORMAL,	   [18] = INCALL, [19] = INCALL,
+	[20] = INCALL, [21] = INCALL,  [22] = INCALL,	   [23] = MMAPED, [24] = NORMAL,
+	[25] = HIFI,   [26] = HIFI,    [27] = ANDROID_AEC, [28] = MMAPED, [29] = INCALL,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
@@ -2288,6 +2289,7 @@ int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		stream = alsa_stream->entry_point_idx - 18;
+		stream = min(stream, 2); /* stream 2 for pb_2 has device id 29 */
 		err = aoc_incall_playback_enable_set(chip, stream, 1);
 		if (err < 0)
 			pr_err("ERR:%d in incall playback start on\n", err);
