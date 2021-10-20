@@ -205,7 +205,7 @@ MODULE_PARM_DESC(aoc_autoload_firmware, "Automatically load firmware if true");
 
 static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
-static int aoc_bus_remove(struct device *dev);
+static void aoc_bus_remove(struct device *dev);
 
 static struct bus_type aoc_bus_type = {
 	.name = "aoc",
@@ -1728,18 +1728,15 @@ static int aoc_bus_probe(struct device *dev)
 	return driver->probe(the_dev);
 }
 
-static int aoc_bus_remove(struct device *dev)
+static void aoc_bus_remove(struct device *dev)
 {
 	struct aoc_service_dev *aoc_dev = AOC_DEVICE(dev);
 	struct aoc_driver *drv = AOC_DRIVER(dev->driver);
-	int ret = -EINVAL;
 
 	pr_notice("bus remove %s\n", dev_name(dev));
 
 	if (drv->remove)
-		ret = drv->remove(aoc_dev);
-
-	return ret;
+		drv->remove(aoc_dev);
 }
 
 int aoc_driver_register(struct aoc_driver *driver)
