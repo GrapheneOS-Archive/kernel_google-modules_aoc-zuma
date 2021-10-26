@@ -69,9 +69,6 @@
 /* This should not be required, as we expect only one of the two to be defined */
 #if IS_ENABLED(CONFIG_SOC_GS201)
     #undef CONFIG_SOC_GS101
-    #define AOC_PLATFORM_SUPPORTS_RESTART 0
-#else
-    #define AOC_PLATFORM_SUPPORTS_RESTART 1
 #endif
 
 #if IS_ENABLED(CONFIG_SOC_GS201) && IS_ENABLED(CONFIG_SOC_GS101)
@@ -1769,11 +1766,6 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
 	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
-#if AOC_PLATFORM_SUPPORTS_RESTART != 1
-	dev_err(dev, "Platform does not support AoC restart");
-	return -EINVAL;
-#endif
-
 	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
@@ -2607,16 +2599,12 @@ err_coredump:
 
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
-#if AOC_PLATFORM_SUPPORTS_RESTART != 1
-	dev_err(prvdata->dev, "aoc watchdog triggered.  Sensors and audio will be gone until reboot\n");
-    (void)restart_rc;
-#else
 	restart_rc = aoc_watchdog_restart(prvdata);
 	if (restart_rc)
 		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
 	else
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
-#endif
+
 	mutex_unlock(&aoc_service_lock);
 }
 
