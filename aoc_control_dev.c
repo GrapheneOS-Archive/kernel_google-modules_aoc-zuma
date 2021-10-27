@@ -20,6 +20,7 @@
 
 #define AOC_CONTROL_NAME "aoc_stats"
 #define AOC_SERVICE_NAME "control"
+#define STAT_READ_TIMEOUT 1000
 
 struct aoc_stat {
 	char name[8];
@@ -457,7 +458,7 @@ static void discovery_workitem(struct work_struct *work)
 			     sizeof(cmd_total));
 
 	if (ret < sizeof(cmd_total)) {
-		dev_err(dev, "failed to read the number of statistics\n");
+		dev_err(dev, "failed to read the number of statistics: %d\n", ret);
 		goto out;
 	}
 
@@ -514,7 +515,7 @@ static int aoc_control_probe(struct aoc_service_dev *sd)
 
 	prvdata = devm_kzalloc(dev, sizeof(*prvdata), GFP_KERNEL);
 	prvdata->service = sd;
-	prvdata->service_timeout = msecs_to_jiffies(100);
+	prvdata->service_timeout = msecs_to_jiffies(STAT_READ_TIMEOUT);
 	mutex_init(&prvdata->lock);
 
 	INIT_WORK(&prvdata->discovery_work, discovery_workitem);
