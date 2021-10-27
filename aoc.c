@@ -93,15 +93,16 @@
 
 #define MAX_RESET_REASON_STRING_LEN 128UL
 
-#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
-#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
-
 #if IS_ENABLED(CONFIG_SOC_GS201)
 	#define AOC_PCU_BASE  AOC_PCU_BASE_PRO
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_PRO
+	#define AOC_CP_APERTURE_START_OFFSET 0x7FDF80
+	#define AOC_CP_APERTURE_END_OFFSET   0x7FFFFF
 #elif IS_ENABLED(CONFIG_SOC_GS101)
 	#define AOC_PCU_BASE  AOC_PCU_BASE_WC
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
+	#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
+	#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
 	#define GPIO_INTERRUPT 93
 #endif
 
@@ -2031,8 +2032,13 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping gsa mailbox failed\n");
 
+	/* Map in modem registers */
+	if (iommu_map(domain, 0x9E300000, 0x14E00000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping modem failed\n");
+
 	/* Map in BLK_TPU */
-	/* if (iommu_map(domain, 0x9E300000, 0x1CE00000, SZ_2M,
+	/* if (iommu_map(domain, 0x9E600000, 0x1CE00000, SZ_2M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping mailboxes failed\n"); */
 
@@ -2045,11 +2051,6 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping usb failed\n");
-
-	/* Map in modem registers */
-	/* if (iommu_map(domain, 0x9E600000, 0x40000000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping modem failed\n"); */
 #else
 	/* Map in the xhci_dma carveout */
 	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
