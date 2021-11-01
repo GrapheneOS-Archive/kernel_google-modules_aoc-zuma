@@ -2133,9 +2133,16 @@ static void aoc_monitor_online(struct work_struct *work)
 		container_of(work, struct aoc_prvdata, monitor_work.work);
 	int restart_rc;
 
+
 	mutex_lock(&aoc_service_lock);
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
+
+#if IS_ENABLED(CONFIG_SOC_GS201)
+		/* TODO: Causing APC watchdogs on GS201 */
+		mutex_unlock(&aoc_service_lock);
+		return;
+#endif
 
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
