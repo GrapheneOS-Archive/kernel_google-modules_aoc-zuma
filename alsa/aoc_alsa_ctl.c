@@ -1750,6 +1750,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("US Record Enable", SND_SOC_NOPM, 0, 1, 0,
 		       us_record_ctl_get, us_record_ctl_set),
 
+
 	/* LVM enable 1/0 for comp offload */
 	SOC_SINGLE_EXT("LVM Enable", SND_SOC_NOPM, 0, 1, 0,
 		       lvm_enable_ctl_get, lvm_enable_ctl_set),

@@ -94,7 +94,7 @@ static int xhci_sync_dev_ctx(struct xhci_hcd *xhci, unsigned int slot_id)
 					ep_ctx->deq, ep_ctx->tx_info));
 #else
 	xhci_dbg(xhci, "%s\n",
-		 xhci_decode_slot_context(
+		 xhci_decode_slot_context(str,
 			 slot_ctx->dev_info, slot_ctx->dev_info2,
 			 slot_ctx->tt_info, slot_ctx->dev_state));
 	xhci_dbg(xhci, "%s\n",
