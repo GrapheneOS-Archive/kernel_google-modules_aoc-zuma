@@ -2062,7 +2062,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		dev_err(dev, "mapping gsa mailbox failed\n");
 
 	/* Map in modem registers */
-	if (iommu_map(domain, 0x9E300000, 0x14E00000, SZ_1M,
+	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping modem failed\n");
 
