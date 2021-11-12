@@ -1821,6 +1821,7 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	chip->audio_capture_mic_source = BUILTIN_MIC;
 	chip->voice_call_mic_source = 0;
 	chip->voice_call_mic_mute = 0;
+	chip->ft_aec_ref_source = DEFAULT_PLAYBACK;
 	chip->compr_offload_volume = 15;
 	chip->voice_call_audio_enable = 1;
 	chip->mic_spatial_module_enable = 0;

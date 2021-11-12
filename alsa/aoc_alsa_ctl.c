@@ -864,6 +864,38 @@ static int audio_capture_mic_source_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int ft_aec_ref_source_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->ft_aec_ref_source;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int ft_aec_ref_source_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	if (ucontrol->value.integer.value[0] < NUM_AEC_REF_SOURCE)
+		chip->ft_aec_ref_source = ucontrol->value.integer.value[0];
+	else {
+		err = -EINVAL;
+		pr_err("ERR:%d invalid ft aec ref source\n", err);
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int voice_call_mic_source_get(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
@@ -1527,6 +1559,11 @@ static const char *voice_call_mic_source_texts[] = { "Default", "Builtin_MIC", "
 static SOC_ENUM_SINGLE_DECL(voice_call_mic_source_enum, 1, 0,
 			    voice_call_mic_source_texts);
 
+/* AEC reference source */
+static const char *ft_aec_ref_source_texts[NUM_AEC_REF_SOURCE] = { "Default", "SPEAKER", "USB",
+								   "BT" };
+static SOC_ENUM_SINGLE_DECL(ft_aec_ref_source_enum, 1, 0, ft_aec_ref_source_texts);
+
 static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
@@ -1682,6 +1719,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_ENUM_EXT("Audio Capture Mic Source", audio_capture_mic_source_enum,
 		     audio_capture_mic_source_get, audio_capture_mic_source_set),
+
+	SOC_ENUM_EXT("FT AEC Reference Source", ft_aec_ref_source_enum,
+		     ft_aec_ref_source_get, ft_aec_ref_source_set),
 
 	SOC_ENUM_EXT("Voice Call Mic Source", voice_call_mic_source_enum,
 		     voice_call_mic_source_get, voice_call_mic_source_set),
