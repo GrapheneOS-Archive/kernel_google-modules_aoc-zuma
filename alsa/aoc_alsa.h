@@ -173,6 +173,7 @@ enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, ANDROID_AEC, COMPRESS };
 enum { BUILTIN_MIC0 = 0, BUILTIN_MIC1, BUILTIN_MIC2, BUILTIN_MIC3 };
 enum { MIC_LOW_POWER_GAIN = 0, MIC_HIGH_POWER_GAIN, MIC_CURRENT_GAIN };
 enum { DEFAULT_MIC = 0, BUILTIN_MIC, USB_MIC, BT_MIC, IN_CALL_MUSIC, NO_MIC=IN_CALL_MUSIC, ERASER };
+enum aec_ref_source { DEFAULT_PLAYBACK = 0, SPEAKER_PLAYBACK, USB_PLAYBACK, BT_PLAYBACK, NUM_AEC_REF_SOURCE};
 enum { INCALL_CAPTURE_OFF = 0, INCALL_CAPTURE_UL, INCALL_CAPTURE_DL, INCALL_CAPTURE_UL_DL };
 enum { NONBLOCKING = 0, BLOCKING = 1 };
 enum { STOP = 0, START };
@@ -199,6 +200,7 @@ struct aoc_chip {
 	int mute;
 	int audio_capture_mic_source;
 	int voice_call_mic_source;
+	enum aec_ref_source ft_aec_ref_source;
 	int voice_call_mic_mute;
 	int default_mic_hw_gain;
 	int voice_call_audio_enable;

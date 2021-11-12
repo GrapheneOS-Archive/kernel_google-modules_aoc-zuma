@@ -2531,30 +2531,51 @@ exit:
 	return err;
 }
 
-static int aoc_audio_modem_mic_input(struct aoc_chip *chip,
-				 int input_cmd, int mic_input_source)
+static int aoc_audio_modem_mic_input(struct aoc_chip *chip, int input_cmd, int mic_input_source)
 {
 	int err;
 	struct CMD_HDR cmd0; /* For modem mic input STOP */
-	struct CMD_AUDIO_INPUT_MODEM_INPUT_START cmd1;
+	struct CMD_AUDIO_INPUT_MODEM_INPUT_START_2 cmd1;
 
 	if (input_cmd == START) {
-		AocCmdHdrSet(&(cmd1.parent),
-			     CMD_AUDIO_INPUT_MODEM_INPUT_START_ID,
-			     sizeof(cmd1));
+		AocCmdHdrSet(&(cmd1.parent), CMD_AUDIO_INPUT_MODEM_INPUT_START_2_ID, sizeof(cmd1));
 
 		cmd1.mic_input_source = mic_input_source;
-		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd1,
-					sizeof(cmd1), NULL, chip);
+		switch (chip->ft_aec_ref_source) {
+		case DEFAULT_PLAYBACK:
+			cmd1.ref_input_source = mic_input_source;
+			break;
+
+		case SPEAKER_PLAYBACK:
+			cmd1.ref_input_source = MODEM_MIC_INPUT_INDEX;
+			break;
+
+		case USB_PLAYBACK:
+			cmd1.ref_input_source = MODEM_USB_INPUT_INDEX;
+			break;
+
+		case BT_PLAYBACK:
+			cmd1.ref_input_source = MODEM_BT_INPUT_INDEX;
+			break;
+
+		default:
+			pr_err("ERR: AEC ref source wrong %d!", chip->ft_aec_ref_source);
+			cmd1.ref_input_source = mic_input_source;
+		}
+
+		pr_notice("Modem mic input source: %d, aec ref source: %d\n", cmd1.mic_input_source,
+			  cmd1.ref_input_source);
+
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd1, sizeof(cmd1), NULL,
+					chip);
 		if (err < 0)
 			pr_err("ERR:%d modem input start fail!\n", err);
 
 	} else {
-		AocCmdHdrSet(&cmd0, CMD_AUDIO_INPUT_MODEM_INPUT_STOP_ID,
-			     sizeof(cmd0));
+		AocCmdHdrSet(&cmd0, CMD_AUDIO_INPUT_MODEM_INPUT_STOP_ID, sizeof(cmd0));
 
-		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd0,
-					sizeof(cmd0), NULL, chip);
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd0, sizeof(cmd0), NULL,
+					chip);
 		if (err < 0)
 			pr_err("ERR:%d modem input stop fail!\n", err);
 	}
