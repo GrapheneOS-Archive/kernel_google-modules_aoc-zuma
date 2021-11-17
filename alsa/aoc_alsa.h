@@ -201,6 +201,7 @@ struct aoc_chip {
 	int audio_capture_mic_source;
 	int voice_call_mic_source;
 	enum aec_ref_source ft_aec_ref_source;
+	enum aec_ref_source eraser_aec_ref_source;
 	int voice_call_mic_mute;
 	int default_mic_hw_gain;
 	int voice_call_audio_enable;
@@ -328,6 +329,7 @@ int aoc_capture_filter_runtime_control(struct aoc_chip *chip, uint32_t port_id, 
 int aoc_audio_capture_runtime_trigger(struct aoc_chip *chip, int ep_id,
 	 int dst, bool on);
 int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable);
+int aoc_eraser_aec_reference_set(struct aoc_chip *chip, long ref_source);
 
 int aoc_voice_call_mic_mute(struct aoc_chip *chip, int mute);
 int aoc_incall_capture_enable_get(struct aoc_chip *chip, int stream, long *val);

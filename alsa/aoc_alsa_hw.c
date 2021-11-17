@@ -2531,6 +2531,45 @@ exit:
 	return err;
 }
 
+int aoc_eraser_aec_reference_set(struct aoc_chip *chip, long aec_input_source)
+{
+	int err;
+	struct CMD_AUDIO_INPUT_FEEDBACK_SRC_SELECT_REF cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_INPUT_HOTWORD_SELECT_AEC_REF_ID, sizeof(cmd));
+
+	cmd.aec_ref_index = 0;
+
+	switch (aec_input_source) {
+	case DEFAULT_PLAYBACK:
+	case SPEAKER_PLAYBACK:
+		cmd.aec_ref_index = FEEDBACK_SRC_AEC_SPKR_INPUT_INDEX;
+		break;
+
+	case USB_PLAYBACK:
+		cmd.aec_ref_index = FEEDBACK_SRC_AEC_USB_INPUT_INDEX;
+		break;
+
+	case BT_PLAYBACK:
+		cmd.aec_ref_index = FEEDBACK_SRC_AEC_BT_INPUT_INDEX;
+		break;
+
+	default:
+		pr_err("ERR: Eraser AEC ref source wrong %ld, fall back to default!", aec_input_source);
+		cmd.aec_ref_index = FEEDBACK_SRC_AEC_SPKR_INPUT_INDEX;
+	}
+
+	pr_notice("Eraser AEC ref source set as %ld\n", aec_input_source);
+
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in eraser aec ref source set!\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 static int aoc_audio_modem_mic_input(struct aoc_chip *chip, int input_cmd, int mic_input_source)
 {
 	int err;
