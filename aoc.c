@@ -538,7 +538,6 @@ static void aoc_mbox_rx_callback(struct mbox_client *cl, void *mssg)
 	case AOC_STATE_FIRMWARE_LOADED:
 		if (aoc_fw_ready()) {
 			aoc_state = AOC_STATE_STARTING;
-			cancel_delayed_work_sync(&prvdata->monitor_work);
 			schedule_work(&prvdata->online_work);
 		}
 		break;
@@ -2168,6 +2167,8 @@ static void aoc_did_become_online(struct work_struct *work)
 		container_of(work, struct aoc_prvdata, online_work);
 	struct device *dev = prvdata->dev;
 	int i, s;
+
+	cancel_delayed_work_sync(&prvdata->monitor_work);
 
 	mutex_lock(&aoc_service_lock);
 
