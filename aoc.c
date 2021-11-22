@@ -130,6 +130,10 @@ struct aoc_prvdata {
 	struct aoc_service_dev **services;
 
 	struct work_struct online_work;
+
+	struct work_struct process_work;
+	int process_offset;
+
 	struct resource dram_resource;
 	aoc_map_handler map_handler;
 	void *map_handler_ctx;
@@ -267,7 +271,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata);
 static void signal_aoc(struct mbox_chan *channel);
 static void reset_sensor_power(struct aoc_prvdata *prvdata, bool is_init);
 
-static void aoc_process_services(struct aoc_prvdata *prvdata, int offset);
+static void aoc_process_services(struct work_struct *work);
 
 static irqreturn_t watchdog_int_handler(int irq, void *dev);
 static void aoc_watchdog(struct work_struct *work);
@@ -542,7 +546,8 @@ static void aoc_mbox_rx_callback(struct mbox_client *cl, void *mssg)
 		}
 		break;
 	case AOC_STATE_ONLINE:
-		aoc_process_services(prvdata, slot->index);
+		prvdata->process_offset = slot->index;
+		schedule_work(&prvdata->process_work);
 		break;
 	default:
 		break;
@@ -2349,15 +2354,20 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
 }
 
-static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
+static void aoc_process_services(struct work_struct *work)
 {
+	struct aoc_prvdata *prvdata =
+		container_of(work, struct aoc_prvdata, process_work);
+
 	struct aoc_service_dev *service_dev;
+	int offset = prvdata->process_offset;
 	aoc_service *service;
 	int services;
 	int i;
 
+	mutex_lock(&aoc_service_lock);
 	if (aoc_state != AOC_STATE_ONLINE)
-		return;
+		goto exit;
 
 	services = aoc_num_services();
 	for (i = 0; i < services; i++) {
@@ -2378,6 +2388,8 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 				wake_up(&service_dev->write_queue);
 		}
 	}
+exit:
+	mutex_unlock(&aoc_service_lock);
 }
 
 void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
@@ -2465,7 +2477,8 @@ static irqreturn_t aoc_int_handler(int irq, void *dev)
 			schedule_work(&aoc_online_work);
 		}
 	} else if (aoc_state == AOC_STATE_ONLINE) {
-		aoc_process_services(dev_get_drvdata(dev), 0);
+		prvdata->process_offset = 0;
+		schedule_work(&prvdata->process_work);
 	}
 
 	return IRQ_HANDLED;
@@ -3251,6 +3264,8 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	aoc_control = aoc_dram_translate(prvdata, 6 * SZ_1M);
 
 	INIT_WORK(&prvdata->online_work, aoc_did_become_online);
+
+	INIT_WORK(&prvdata->process_work, aoc_process_services);
 
 	INIT_DELAYED_WORK(&prvdata->monitor_work, aoc_monitor_online);
 
