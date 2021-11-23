@@ -150,8 +150,11 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 
 	WARN_ON(!alsa_stream || !alsa_stream->substream);
 
-	if(alsa_stream->substream->runtime->status->state != SNDRV_PCM_STATE_RUNNING)
-			return HRTIMER_NORESTART;
+	if(alsa_stream->substream->runtime->status->state == SNDRV_PCM_STATE_PREPARED) {
+		aoc_timer_restart(alsa_stream);
+		return HRTIMER_RESTART;
+	} else if(alsa_stream->substream->runtime->status->state != SNDRV_PCM_STATE_RUNNING)
+		return HRTIMER_NORESTART;
 
 	/* Start the timer immediately for next period */
 	/* aoc_timer_start(alsa_stream); */
