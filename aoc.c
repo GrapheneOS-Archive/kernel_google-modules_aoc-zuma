@@ -1087,8 +1087,12 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 	if (dev->dead)
 		return -ENODEV;
 
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -EBUSY;
+	mutex_lock(&aoc_service_lock);
+
+	if (aoc_state != AOC_STATE_ONLINE) {
+		ret = -EBUSY;
+		goto err;
+	}
 
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
@@ -1098,11 +1102,14 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 
 	if (!aoc_is_valid_dram_address(prvdata, service)) {
 		WARN_ONCE(1, "aoc service %d has invalid DRAM region", service_number);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err;
 	}
 
-	if (aoc_service_message_slots(service, AOC_UP) == 0)
-		return -EBADF;
+	if (aoc_service_message_slots(service, AOC_UP) == 0) {
+		ret = -EBADF;
+		goto err;
+	}
 
 	if (!aoc_service_can_read_message(service, AOC_UP)) {
 		set_bit(service_number, &read_blocked_mask);
@@ -1114,27 +1121,36 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 		clear_bit(service_number, &read_blocked_mask);
 	}
 
-	if (dev->dead)
-		return -ENODEV;
-
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -ENODEV;
+	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	if (ret < 0)
-		return ret;
+		goto err;
 
 	/* AoC timed out */
-	if (ret == 0)
-		return -ETIMEDOUT;
+	if (ret == 0) {
+		ret = -ETIMEDOUT;
+		goto err;
+	}
 
 	if (!aoc_service_is_ring(service) &&
 	    count < aoc_service_current_message_size(service, prvdata->ipc_base,
-						     AOC_UP))
-		return -EFBIG;
+						     AOC_UP)) {
+		ret = -EFBIG;
+		goto err;
+	}
 
 	msg_size = count;
 	aoc_service_read_message(service, prvdata->ipc_base, AOC_UP, buffer,
 				 &msg_size);
+
+err:
+	mutex_unlock(&aoc_service_lock);
+
+	if (ret < 0)
+		return ret;
 
 	return msg_size;
 }
@@ -1230,8 +1246,11 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 	if (dev->dead)
 		return -ENODEV;
 
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -ENODEV;
+	mutex_lock(&aoc_service_lock);
+	if (aoc_state != AOC_STATE_ONLINE) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
@@ -1241,14 +1260,19 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 
 	if (!aoc_is_valid_dram_address(prvdata, service)) {
 		WARN_ONCE(1, "aoc service %d has invalid DRAM region", service_number);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err;
 	}
 
-	if (aoc_service_message_slots(service, AOC_DOWN) == 0)
-		return -EBADF;
+	if (aoc_service_message_slots(service, AOC_DOWN) == 0) {
+		ret = -EBADF;
+		goto err;
+	}
 
-	if (count > aoc_service_message_size(service, AOC_DOWN))
-		return -EFBIG;
+	if (count > aoc_service_message_size(service, AOC_DOWN)) {
+		ret = -EFBIG;
+		goto err;
+	}
 
 	if (!aoc_service_can_write_message(service, AOC_DOWN)) {
 		set_bit(service_number, &write_blocked_mask);
@@ -1260,23 +1284,30 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 		clear_bit(service_number, &write_blocked_mask);
 	}
 
-	if (dev->dead)
-		return -ENODEV;
-
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -ENODEV;
+	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	if (ret < 0)
-		return ret;
+		goto err;
 
-	if (ret == 0)
-		return -ETIMEDOUT;
+	if (ret == 0) {
+		ret = -ETIMEDOUT;
+		goto err;
+	}
 
 	ret = aoc_service_write_message(service, prvdata->ipc_base, AOC_DOWN,
 					buffer, count);
 
 	if (!aoc_service_is_ring(service) || aoc_ring_is_push(service))
 		signal_aoc(prvdata->mbox_channels[interrupt].channel);
+
+err:
+	mutex_unlock(&aoc_service_lock);
+
+	if (ret < 0)
+		return ret;
 
 	return count;
 }
