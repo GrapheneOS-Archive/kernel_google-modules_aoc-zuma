@@ -16,6 +16,7 @@ KBUILD_OPTIONS += CONFIG_AOC_DRIVER=m CONFIG_WC_MBOX=m \
 		  CONFIG_AOC_CONTROL_DRIVER=m CONFIG_AOC_UWB_DRIVER=m \
 
 ccflags-y := -I$(KERNEL_SRC)/../google-modules/aoc_ipc
+ccflags-y += -I$(KERNEL_SRC)/device-modules/drivers/dma-buf/heaps
 headers-y := uapi/aoc.h
 
 modules modules_install clean:

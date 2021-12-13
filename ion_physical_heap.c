@@ -8,7 +8,6 @@
 #include <linux/genalloc.h>
 #include <linux/io.h>
 #include <linux/mm.h>
-#include <linux/samsung-dma-heap.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
