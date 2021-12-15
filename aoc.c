@@ -135,7 +135,7 @@ struct aoc_prvdata {
 	void *map_handler_ctx;
 
 	struct delayed_work monitor_work;
-	bool aoc_process_active;
+	atomic_t aoc_process_active;
 
 	struct device *dev;
 	struct iommu_domain *domain;
@@ -1089,7 +1089,6 @@ EXPORT_SYMBOL_GPL(aoc_service_read);
 ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 				 size_t count, long timeout)
 {
-	const struct device *parent;
 	struct aoc_prvdata *prvdata;
 	aoc_service *service;
 
@@ -1103,15 +1102,18 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 	if (dev->dead)
 		return -ENODEV;
 
-	mutex_lock(&aoc_service_lock);
+	if (!aoc_platform_device)
+		return -ENODEV;
 
-	if (aoc_state != AOC_STATE_ONLINE) {
+	prvdata = platform_get_drvdata(aoc_platform_device);
+	if (!prvdata)
+		return -ENODEV;
+
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
 		ret = -EBUSY;
 		goto err;
 	}
-
-	parent = dev->dev.parent;
-	prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
 	service = service_at_index(prvdata, dev->service_index);
@@ -1163,7 +1165,7 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 				 &msg_size);
 
 err:
-	mutex_unlock(&aoc_service_lock);
+	atomic_dec(&prvdata->aoc_process_active);
 
 	if (ret < 0)
 		return ret;
@@ -1248,7 +1250,6 @@ EXPORT_SYMBOL_GPL(aoc_service_write);
 ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *buffer,
 				  size_t count, long timeout)
 {
-	const struct device *parent;
 	struct aoc_prvdata *prvdata;
 
 	aoc_service *service;
@@ -1262,14 +1263,18 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 	if (dev->dead)
 		return -ENODEV;
 
-	mutex_lock(&aoc_service_lock);
-	if (aoc_state != AOC_STATE_ONLINE) {
-		ret = -ENODEV;
+	if (!aoc_platform_device)
+		return -ENODEV;
+
+	prvdata = platform_get_drvdata(aoc_platform_device);
+	if (!prvdata)
+		return -ENODEV;
+
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+		ret = -EBUSY;
 		goto err;
 	}
-
-	parent = dev->dev.parent;
-	prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
 	service = service_at_index(prvdata, service_number);
@@ -1320,7 +1325,7 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 		signal_aoc(prvdata->mbox_channels[interrupt].channel);
 
 err:
-	mutex_unlock(&aoc_service_lock);
+	atomic_dec(&prvdata->aoc_process_active);
 
 	if (ret < 0)
 		return ret;
@@ -2354,8 +2359,8 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		pr_notice("taking aoc offline\n");
 		aoc_state = AOC_STATE_OFFLINE;
 
-		/* wait until aoc_process_services finish */
-		while (prvdata->aoc_process_active);
+		/* wait until aoc_process or service write/read finish */
+		while (!!atomic_read(&prvdata->aoc_process_active));
 
 		bus_for_each_dev(&aoc_bus_type, NULL, NULL, aoc_remove_device);
 
@@ -2391,10 +2396,10 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 	int services;
 	int i;
 
+	atomic_inc(&prvdata->aoc_process_active);
+
 	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
 		goto exit;
-
-	prvdata->aoc_process_active = true;
 
 	services = aoc_num_services();
 	for (i = 0; i < services; i++) {
@@ -2416,7 +2421,7 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 		}
 	}
 exit:
-	prvdata->aoc_process_active = false;
+	atomic_dec(&prvdata->aoc_process_active);
 }
 
 void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
