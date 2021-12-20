@@ -2,6 +2,7 @@
 
 ccflags-y	+= -I$(srctree)/../gs/google-modules/aoc_ipc
 ccflags-y	+= -I$(srctree)/../gs/kernel/device-modules/drivers/dma-buf/heaps
+ccflags-y	+= -I$(srctree)/drivers/dma-buf
 
 obj-$(CONFIG_WC_MBOX)			+= mailbox-wc.o
 
