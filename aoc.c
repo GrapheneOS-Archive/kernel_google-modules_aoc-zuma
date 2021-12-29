@@ -86,6 +86,8 @@
 #define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
 #define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
 
+#define MAX_SENSOR_POWER_NUM 5
+
 static DEFINE_MUTEX(aoc_service_lock);
 
 enum AOC_FW_STATE {
@@ -170,8 +172,9 @@ struct aoc_prvdata {
 #endif
 	struct device *gsa_dev;
 
-	struct regulator *regulator_sensor_1v8;
-	struct regulator *regulator_sensor_3v3;
+	int sensor_power_count;
+	const char *sensor_power_list[MAX_SENSOR_POWER_NUM];
+	struct regulator *sensor_regulator[MAX_SENSOR_POWER_NUM];
 };
 
 /* TODO: Reduce the global variables (move into a driver structure) */
@@ -2142,40 +2145,34 @@ err:
 static bool configure_sensor_regulator(struct aoc_prvdata *prvdata, bool enable)
 {
 	bool check_enabled;
-
+	int i;
 	if (enable) {
 		check_enabled = true;
-		if (prvdata->regulator_sensor_1v8 &&
-				!regulator_is_enabled(prvdata->regulator_sensor_1v8)) {
-			if (regulator_enable(prvdata->regulator_sensor_1v8)) {
-				pr_warn("encountered error on enabling sensor 1v8");
+		for (i = 0; i < prvdata->sensor_power_count; i++) {
+			if (!prvdata->sensor_regulator[i] ||
+					regulator_is_enabled(prvdata->sensor_regulator[i])) {
+				continue;
 			}
-			check_enabled &= regulator_is_enabled(prvdata->regulator_sensor_1v8);
-		}
 
-		if (prvdata->regulator_sensor_3v3 &&
-				!regulator_is_enabled(prvdata->regulator_sensor_3v3)) {
-			if (regulator_enable(prvdata->regulator_sensor_3v3)) {
-				pr_warn("encountered error on enabling sensor 3v3");
+			if (regulator_enable(prvdata->sensor_regulator[i])) {
+				pr_warn("encountered error on enabling %s.",
+					prvdata->sensor_power_list[i]);
 			}
-			check_enabled &= regulator_is_enabled(prvdata->regulator_sensor_3v3);
+			check_enabled &= regulator_is_enabled(prvdata->sensor_regulator[i]);
 		}
 	} else {
 		check_enabled = false;
-		if (prvdata->regulator_sensor_3v3 &&
-				regulator_is_enabled(prvdata->regulator_sensor_3v3)) {
-			if (regulator_disable(prvdata->regulator_sensor_3v3)) {
-				pr_warn("encountered error on disabling sensor 3v3");
+		for (i = prvdata->sensor_power_count - 1; i >= 0; i--) {
+			if (!prvdata->sensor_regulator[i] ||
+					!regulator_is_enabled(prvdata->sensor_regulator[i])) {
+				continue;
 			}
-			check_enabled |= regulator_is_enabled(prvdata->regulator_sensor_3v3);
-		}
 
-		if (prvdata->regulator_sensor_1v8 &&
-				regulator_is_enabled(prvdata->regulator_sensor_1v8)) {
-			if (regulator_disable(prvdata->regulator_sensor_1v8)) {
-				pr_warn("encountered error on disabling sensor 1v8");
+			if (regulator_disable(prvdata->sensor_regulator[i])) {
+				pr_warn("encountered error on disabling %s.",
+					prvdata->sensor_power_list[i]);
 			}
-			check_enabled |= regulator_is_enabled(prvdata->regulator_sensor_1v8);
+			check_enabled |= regulator_is_enabled(prvdata->sensor_regulator[i]);
 		}
 	}
 
@@ -2187,6 +2184,10 @@ static void reset_sensor_power(struct aoc_prvdata *prvdata, bool is_init)
 	const int max_retry = 5;
 	int count;
 	bool success;
+
+	if (prvdata->sensor_power_count == 0) {
+		return;
+	}
 
 	if (!is_init) {
 		count = 0;
@@ -3126,16 +3127,27 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	}
 #endif
 
-	prvdata->regulator_sensor_1v8 = devm_regulator_get_exclusive(dev, "sensor_1v8");
-	if (IS_ERR_OR_NULL(prvdata->regulator_sensor_1v8)) {
-		prvdata->regulator_sensor_1v8 = NULL;
-		pr_err("failed to get sensor 1v8 regulator");
+	prvdata->sensor_power_count = of_property_count_strings(dev->of_node, "sensor_power_list");
+	if (prvdata->sensor_power_count > MAX_SENSOR_POWER_NUM) {
+		pr_warn("sensor power count %i is larger than available number.",
+			prvdata->sensor_power_count);
+		prvdata->sensor_power_count = MAX_SENSOR_POWER_NUM;
+	} else if (prvdata->sensor_power_count < 0) {
+		pr_err("unsupported sensor power list, err = %i.", prvdata->sensor_power_count);
+		prvdata->sensor_power_count = 0;
 	}
 
-	prvdata->regulator_sensor_3v3 = devm_regulator_get_exclusive(dev, "sensor_3v3");
-	if (IS_ERR_OR_NULL(prvdata->regulator_sensor_3v3)) {
-		prvdata->regulator_sensor_3v3 = NULL;
-		pr_err("failed to get sensor 3v3 regulator");
+	ret = of_property_read_string_array(dev->of_node, "sensor_power_list",
+					    (const char**)&prvdata->sensor_power_list,
+					    prvdata->sensor_power_count);
+
+	for (i = 0; i < prvdata->sensor_power_count; i++) {
+		prvdata->sensor_regulator[i] =
+				devm_regulator_get_exclusive(dev, prvdata->sensor_power_list[i]);
+		if (IS_ERR_OR_NULL(prvdata->sensor_regulator[i])) {
+			prvdata->sensor_regulator[i] = NULL;
+			pr_err("failed to get %s regulator.", prvdata->sensor_power_list[i]);
+		}
 	}
 
 	reset_sensor_power(prvdata, true);
@@ -3216,16 +3228,16 @@ err_platform_not_null:
 static int aoc_platform_remove(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata;
+	int i;
 
 	pr_debug("platform_remove\n");
 
 	prvdata = platform_get_drvdata(pdev);
 	acpm_ipc_release_channel(pdev->dev.of_node, prvdata->acpm_async_id);
-	if (prvdata->regulator_sensor_1v8) {
-		regulator_put(prvdata->regulator_sensor_1v8);
-	}
-	if (prvdata->regulator_sensor_3v3) {
-		regulator_put(prvdata->regulator_sensor_3v3);
+	for (i = 0; i < prvdata->sensor_power_count; i++) {
+		if (prvdata->sensor_regulator[i]) {
+			regulator_put(prvdata->sensor_regulator[i]);
+		}
 	}
 	sysfs_remove_groups(&pdev->dev.kobj, aoc_groups);
 
