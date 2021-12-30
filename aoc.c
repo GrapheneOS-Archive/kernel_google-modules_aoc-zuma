@@ -867,7 +867,6 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 	struct aoc_prvdata *prvdata;
 	aoc_service *service;
 	void *ring_base;
-	int service_number;
 
 	if (!dev)
 		return -EINVAL;
@@ -875,7 +874,6 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
 
-	service_number = dev->service_index;
 	service = service_at_index(prvdata, dev->service_index);
 
 	ring_base = aoc_service_ring_base(service, prvdata->ipc_base, dir);
@@ -1966,7 +1964,7 @@ static void aoc_did_become_online(struct work_struct *work)
 	struct aoc_prvdata *prvdata =
 		container_of(work, struct aoc_prvdata, online_work);
 	struct device *dev = prvdata->dev;
-	int i, s;
+	int i, s, ret;
 
 	mutex_lock(&aoc_service_lock);
 
@@ -2010,8 +2008,12 @@ static void aoc_did_become_online(struct work_struct *work)
 
 	aoc_state = AOC_STATE_ONLINE;
 
-	for (i = 0; i < s; i++)
-		device_register(&prvdata->services[i]->dev);
+	for (i = 0; i < s; i++) {
+		ret = device_register(&prvdata->services[i]->dev);
+		if (ret)
+			dev_err(dev, "failed to register service device %s err=%d\n",
+				dev_name(&prvdata->services[i]->dev), ret);
+	}
 
 err:
 	mutex_unlock(&aoc_service_lock);
