@@ -154,12 +154,9 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 	struct timespec64 tv0, tv1;
 	int err, count;
 	unsigned long time_expired;
-	int in_pcm_trigger_callback;
 
 	if (!cmd_channel || !cmd)
 		return -EINVAL;
-
-	in_pcm_trigger_callback = irqs_disabled();
 
 	if (mutex_lock_interruptible(&chip->audio_cmd_chan_mutex))
 		return -EINTR;
