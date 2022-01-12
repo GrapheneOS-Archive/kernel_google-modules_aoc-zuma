@@ -1893,10 +1893,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		       NULL),
 	SOC_SINGLE_EXT("VOIP Rx Volume", SND_SOC_NOPM, 0, 100, 0, NULL, NULL),
 
-	SOC_SINGLE_EXT("PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0, pcm_wait_time_get,
+	SOC_SINGLE_EXT("PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 1000000, 0, pcm_wait_time_get,
 		       pcm_wait_time_set),
 
-	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0,
+	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 1000000, 0,
 		voice_pcm_wait_time_get, voice_pcm_wait_time_set),
 
 	{
