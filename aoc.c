@@ -2383,6 +2383,7 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
+	u32 section_flags;
 
 	prvdata->total_restarts++;
 
@@ -2410,18 +2411,16 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (!ramdump_header->valid) {
-		dev_err(prvdata->dev, "aoc coredump failed: timed out\n");
+		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
 		strscpy(crash_info, "AoC Watchdog : coredump timeout",
 			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
 	}
 
-	if (memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
+	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
 			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
 	}
 
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
@@ -2441,12 +2440,15 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 
-	if (ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags & RAMDUMP_FLAG_VALID)
-		strscpy(crash_info, (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
-	else
-		strscpy(crash_info, "AoC Watchdog : invalid crash info",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	if (ramdump_header->valid) {
+		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
+		if (section_flags & RAMDUMP_FLAG_VALID)
+			strscpy(crash_info, (const char *)ramdump_header +
+				RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		else
+			strscpy(crash_info, "AoC Watchdog : invalid crash info",
+				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	}
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
