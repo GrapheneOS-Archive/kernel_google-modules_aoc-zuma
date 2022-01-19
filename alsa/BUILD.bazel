@@ -17,18 +17,18 @@ kernel_module(
     ]) + [
         "//gs/google-modules/aoc_ipc:headers",
         "//gs/google-modules/aoc:headers",
-        "//gs/kernel/device-modules:gs101_soc_headers",
+        "//gs/google-modules/soc-modules:gs101_soc_headers",
     ],
     outs = [
         "aoc_alsa_dev.ko",
         "aoc_alsa_dev_util.ko",
     ],
-    kernel_build = "//gs/kernel/device-modules:slider",
+    kernel_build = "//gs/google-modules/soc-modules:slider",
     kernel_module_deps = [
         "//gs/google-modules/aoc:aoc.slider",
-        "//gs/kernel/device-modules:gs101_soc",
+        "//gs/google-modules/soc-modules:gs101_soc",
     ],
     visibility = [
-        "//gs/kernel/device-modules:__pkg__",
+        "//gs/google-modules/soc-modules:__pkg__",
     ],
 )
