@@ -107,6 +107,8 @@
 	#define GPIO_INTERRUPT 93
 #endif
 
+#define MAX_SENSOR_POWER_NUM 5
+
 static DEFINE_MUTEX(aoc_service_lock);
 
 enum AOC_FW_STATE {

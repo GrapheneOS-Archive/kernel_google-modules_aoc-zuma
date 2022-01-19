@@ -2555,19 +2555,18 @@ int aoc_eraser_aec_reference_set(struct aoc_chip *chip, long aec_input_source)
 		break;
 
 	default:
-		pr_err("ERR: Eraser AEC ref source wrong %ld, fall back to default!", aec_input_source);
+		pr_err("ERR: Eraser AEC ref source wrong %ld, fall back to default!",
+		       aec_input_source);
 		cmd.aec_ref_index = FEEDBACK_SRC_AEC_SPKR_INPUT_INDEX;
 	}
 
 	pr_notice("Eraser AEC ref source set as %ld\n", aec_input_source);
 
 	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL, chip);
-	if (err < 0) {
+	if (err < 0)
 		pr_err("ERR:%d in eraser aec ref source set!\n", err);
-		return err;
-	}
 
-	return 0;
+	return err;
 }
 
 static int aoc_audio_modem_mic_input(struct aoc_chip *chip, int input_cmd, int mic_input_source)
