@@ -9,7 +9,7 @@ EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../gs/google-modules/aoc_ipc
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../gs/google-modules/aoc
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../gs/google-modules/aoc/Module.symvers
 
-include $(KERNEL_SRC)/../gs/kernel/device-modules/Makefile.include
+include $(KERNEL_SRC)/../gs/google-modules/soc-modules/Makefile.include
 
 modules modules_install clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \
