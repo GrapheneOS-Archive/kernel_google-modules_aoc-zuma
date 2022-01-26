@@ -26,15 +26,7 @@
 #include "aoc_alsa_path.h"
 #include "google-aoc-enum.h"
 
-#define BE_MAP_SZ(x) \
-		ARRAY_SIZE(((struct be_path_cache *)0)->x)
-
-struct be_path_cache {
-	DECLARE_BITMAP(fe_put_mask, IDX_FE_MAX);
-	bool on;
-};
-
-static struct be_path_cache port_array[PORT_MAX] = {
+struct be_path_cache port_array[PORT_MAX] = {
 	[0 ... PORT_MAX - 1] = {
 		.fe_put_mask = {
 			[0 ... BE_MAP_SZ(fe_put_mask) - 1] = 0,
@@ -362,7 +354,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.capture = {
 			.stream_name = "EP2 Capture",
-			.rates = SNDRV_PCM_RATE_8000_48000,
+			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S32_LE,
@@ -376,7 +368,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.capture = {
 			.stream_name = "EP3 Capture",
-			.rates = SNDRV_PCM_RATE_8000_48000,
+			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S32_LE,
@@ -390,7 +382,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.capture = {
 			.stream_name = "EP4 Capture",
-			.rates = SNDRV_PCM_RATE_8000_48000,
+			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S32_LE,
@@ -404,7 +396,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.capture = {
 			.stream_name = "EP5 Capture",
-			.rates = SNDRV_PCM_RATE_8000_48000,
+			.rates = SNDRV_PCM_RATE_8000_96000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S32_LE,
