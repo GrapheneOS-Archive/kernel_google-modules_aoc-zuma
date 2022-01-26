@@ -786,6 +786,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
+	bool fw_signed;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -866,80 +867,56 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		goto free_fw;
 	}
 
-	if (false == _aoc_fw_is_signed(fw)) {
+	fw_signed = _aoc_fw_is_signed(fw);
 
-		dev_info(dev, "Loading unsigned aoc image\n");
+	dev_info(dev, "Loading %s aoc image\n", fw_signed ? "signed" : "unsigned");
 
-		aoc_control = aoc_dram_translate(prvdata, ipc_offset);
+	aoc_control = aoc_dram_translate(prvdata, ipc_offset);
 
-		aoc_fpga_reset(prvdata);
+	aoc_fpga_reset(prvdata);
 
-		_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
+	_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
 
-		aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
-				fw_data, ARRAY_SIZE(fw_data));
-
-		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
-
-		aoc_state = AOC_STATE_FIRMWARE_LOADED;
-
-		dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
-		disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-		prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
-		aoc_a32_reset();
-		enable_irq(prvdata->watchdog_irq);
-
-		/* Monitor if there is callback from aoc after 5sec */
-		cancel_delayed_work_sync(&prvdata->monitor_work);
-		schedule_delayed_work(&prvdata->monitor_work,
-			msecs_to_jiffies(5 * 1000));
-
-		msleep(2000);
-		dev_info(dev, "re-enabling SICD\n");
-		enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-	} else {
-		int rc;
-
-		dev_info(dev, "Loading signed aoc image\n");
-
-		aoc_control = aoc_dram_translate(prvdata, ipc_offset);
-
-		aoc_fpga_reset(prvdata);
-
-		_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
-
-		rc = aoc_fw_authenticate(prvdata, fw);
+	if (fw_signed) {
+		int rc = aoc_fw_authenticate(prvdata, fw);
 		if (rc) {
 			dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
 			goto free_fw;
 		}
+	} else {
+		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
+	}
 
-		aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
-					fw_data, ARRAY_SIZE(fw_data));
+	aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
+			fw_data, ARRAY_SIZE(fw_data));
 
-		dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
-		disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-		prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
+	aoc_state = AOC_STATE_FIRMWARE_LOADED;
 
-		/* start AOC */
-		rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
+	dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
+	disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
+	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
+
+	/* start AOC */
+	if (fw_signed) {
+		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
 		if (rc < 0) {
 			dev_err(dev, "GSA: Failed to start AOC: %d\n", rc);
 			goto free_fw;
 		}
+	} else {
+		aoc_a32_reset();
+	}
 
-		enable_irq(prvdata->watchdog_irq);
-		aoc_state = AOC_STATE_FIRMWARE_LOADED;
+	enable_irq(prvdata->watchdog_irq);
 
-		/* Monitor if there is callback from aoc after 5sec */
-		cancel_delayed_work_sync(&prvdata->monitor_work);
-		schedule_delayed_work(&prvdata->monitor_work,
+	/* Monitor if there is callback from aoc after 5sec */
+	cancel_delayed_work_sync(&prvdata->monitor_work);
+	schedule_delayed_work(&prvdata->monitor_work,
 			msecs_to_jiffies(5 * 1000));
 
-		msleep(2000);
-		dev_info(dev, "re-enabling SICD\n");
-		enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-	}
+	msleep(2000);
+	dev_info(dev, "re-enabling SICD\n");
+	enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
 
 free_fw:
 	release_firmware(fw);
