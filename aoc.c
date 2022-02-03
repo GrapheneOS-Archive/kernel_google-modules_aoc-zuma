@@ -99,12 +99,14 @@
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_PRO
 	#define AOC_CP_APERTURE_START_OFFSET 0x7FDF80
 	#define AOC_CP_APERTURE_END_OFFSET   0x7FFFFF
+	#define AOC_CLOCK_DIVIDER 6
 #elif IS_ENABLED(CONFIG_SOC_GS101)
 	#define AOC_PCU_BASE  AOC_PCU_BASE_WC
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
 	#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
 	#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
 	#define GPIO_INTERRUPT 93
+	#define AOC_CLOCK_DIVIDER 1
 #endif
 
 #define MAX_SENSOR_POWER_NUM 5
@@ -1654,7 +1656,7 @@ static uint64_t clock_offset(void)
 
 static inline u64 sys_tick_to_aoc_tick(u64 sys_tick)
 {
-	return (sys_tick - clock_offset()) / 6;
+	return (sys_tick - clock_offset()) / AOC_CLOCK_DIVIDER;
 }
 
 static ssize_t aoc_clock_show(struct device *dev, struct device_attribute *attr,
