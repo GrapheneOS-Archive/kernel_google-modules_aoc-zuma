@@ -211,6 +211,7 @@ struct sscd_info {
 	u16 seg_count;
 };
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata);
 static void sscd_release(struct device *dev);
 
 static struct sscd_info sscd_info;
@@ -2017,6 +2018,16 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 	return dev;
 }
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata)
+{
+	struct mbox_chan *channel = prvdata->mbox_channels[15].channel;
+	static const uint32_t command[] = { 0, 0, 0, 0, 0x0deada0c, 0, 0, 0 };
+
+	dev_notice(prvdata->dev, "Attempting to force AoC coredump\n");
+
+	mbox_send_message(channel, (void *)&command);
+}
+
 static void signal_aoc(struct mbox_chan *channel)
 {
 #ifdef AOC_JUNO
@@ -2558,11 +2569,16 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_coredump;
 	}
 
+	/* If this was a true watchdog timeout, the AoC may still be running, so
+	 * the coredump will not be written.  Attempt to force a coredump by sending
+	 * a death message to the AoC to trigger a failure.
+	 */
+	trigger_aoc_ramdump(prvdata);
+
 	if (prvdata->ap_triggered_reset) {
 		prvdata->ap_triggered_reset = false;
 		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
 			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
-		goto coredump_submit;
 	}
 
 	ramdump_timeout = jiffies + (5 * HZ);
@@ -2622,7 +2638,6 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.segs[0].vaddr = (void *)carveout_vaddr_from_aoc;
 	sscd_info.seg_count = 1;
 
-coredump_submit:
 	/*
 	 * sscd_report() returns -EAGAIN if there are no readers to consume a
 	 * coredump. Retry sscd_report() with a sleep to handle the race condition
