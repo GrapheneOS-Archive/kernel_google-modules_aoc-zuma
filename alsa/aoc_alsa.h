@@ -112,6 +112,7 @@ enum bluetooth_mode {
 	AHS_BT_MODE_A2DP_ENC_AAC,
 	AHS_BT_MODE_A2DP_ENC_LC3,
 	AHS_BT_MODE_BLE_ENC_LC3,
+	AHS_BT_MODE_BLE_CONVERSATION,
 };
 
 enum TelephonyModes {
