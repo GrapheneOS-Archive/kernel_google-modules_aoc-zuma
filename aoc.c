@@ -2501,6 +2501,8 @@ static void aoc_watchdog(struct work_struct *work)
 	struct aoc_ramdump_header *ramdump_header =
 		(struct aoc_ramdump_header *)((unsigned long)prvdata->dram_virt +
 					      RAMDUMP_HEADER_OFFSET);
+	struct wakeup_source *ws =
+		wakeup_source_register(prvdata->dev, dev_name(prvdata->dev));
 	unsigned long ramdump_timeout;
 	unsigned long carveout_paddr_from_aoc;
 	unsigned long carveout_vaddr_from_aoc;
@@ -2521,6 +2523,9 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.seg_count = 0;
 
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
+	dev_err(prvdata->dev, "holding %s wakelock for 4 sec\n", ws->name);
+	pm_wakeup_ws_event(ws, 4000, true);
+
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
 		goto err_coredump;
