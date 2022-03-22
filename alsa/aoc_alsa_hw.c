@@ -32,6 +32,7 @@ static aoc_audio_sink[] = {
 	[PORT_BT_RX] = SINK_BT,           [PORT_BT_TX] = -1,
 	[PORT_INCALL_RX] = -1,            [PORT_INCALL_TX] = -1,
 	[PORT_INTERNAL_MIC] = -1,	  [PORT_HAPTIC_RX] = SINK_SPEAKER,
+	[PORT_INTERNAL_MIC_US] = -1,
 };
 
 static int hw_id_to_sink(int hw_idx)
@@ -1570,6 +1571,7 @@ static int aoc_audio_capture_set_params(struct aoc_alsa_stream *alsa_stream,
 	struct CMD_AUDIO_INPUT_MIC_RECORD_AP_SET_PARAMS cmd;
 	struct aoc_chip *chip = alsa_stream->chip;
 	int i, mic_id;
+
 
 	/* Regular audio capture should be the primary setting of the single ap filter */
 	if (chip->capture_param_set & (1 << UC_AUDIO_RECORD)) {
