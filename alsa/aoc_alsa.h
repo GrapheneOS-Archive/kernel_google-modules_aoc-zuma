@@ -260,7 +260,7 @@ struct aoc_alsa_stream {
 	struct snd_pcm_substream *substream;
 	struct snd_compr_stream *cstream; /* compress offload stream */
 	int compr_offload_codec;
-	long compr_pcm_io_sample_base;
+	uint64_t compr_pcm_io_sample_base;
 	int offload_temp_data_buf_size;
 	struct timer_list timer; /* For advancing the hw ptr */
 	struct hrtimer hr_timer; /* For advancing the hw ptr */
@@ -407,7 +407,7 @@ int teardown_voipcall(struct aoc_alsa_stream *alsa_stream);
 
 void aoc_compr_offload_isr(struct aoc_service_dev *dev);
 int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type);
-int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream);
+int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream, uint64_t *sample);
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_pause(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_resume(struct aoc_alsa_stream *alsa_stream);
