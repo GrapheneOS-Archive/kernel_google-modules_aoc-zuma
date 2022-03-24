@@ -3268,7 +3268,7 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 	return 0;
 }
 
-int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream)
+int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream, uint64_t *sample)
 {
 	int err;
 	struct CMD_AUDIO_OUTPUT_GET_EP_SAMPLES cmd;
@@ -3283,8 +3283,10 @@ int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d in getting compress offload io-sample number\n",
 		       err);
+	else
+		*sample = cmd.samples;
 
-	return err < 0 ? err : cmd.samples;
+	return err < 0 ? err : 0;
 }
 
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream)
