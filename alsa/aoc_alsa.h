@@ -42,9 +42,19 @@
 #define AOC_COMPR_OFFLOAD_SERVICE "audio_playback6"
 #define AOC_COMPR_OFFLOAD_EOF_SERVICE "decoder_eof"
 
-enum uc_device_id { UC_AUDIO_RECORD = 8, UC_MMAP_RECORD = 9, UC_LOW_LATENCY_AUDIO_RECORD = 10 };
-#define AOC_CAPUTRE_DEVICE_MASK                                                                    \
+enum uc_device_id {
+	UC_AUDIO_RECORD = 8,
+	UC_MMAP_RECORD = 9,
+	UC_LOW_LATENCY_AUDIO_RECORD = 10,
+	UC_ULTRASONIC_RECORD = 12
+};
+
+#define AOC_AUDIO_CAPUTRE_DEVICE_MASK                                                              \
 	(1 << UC_AUDIO_RECORD | 1 << UC_MMAP_RECORD | 1 << UC_LOW_LATENCY_AUDIO_RECORD)
+
+#define AOC_ULTRASONIC_CAPUTRE_DEVICE_MASK (1 << UC_ULTRASONIC_RECORD)
+
+#define AOC_CAPUTRE_DEVICE_MASK (AOC_AUDIO_CAPUTRE_DEVICE_MASK | AOC_ULTRASONIC_CAPUTRE_DEVICE_MASK)
 
 #define AOC_CMD_DEBUG_ENABLE
 #define WAITING_TIME_MS 500
@@ -326,15 +336,15 @@ int aoc_mic_dc_blocker_set(struct aoc_chip *chip, int enable);
 
 int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val);
 int aoc_mic_record_gain_set(struct aoc_chip *chip, long val);
-int aoc_audio_capture_mic_prepare(struct aoc_chip *chip);
-int aoc_audio_capture_mic_close(struct aoc_chip *chip);
+int aoc_audio_capture_mic_prepare(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
+int aoc_audio_capture_mic_close(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_capture_active_stream_num(struct aoc_chip *chip);
-int aoc_audio_capture_param_configured_num(struct aoc_chip *chip);
-int ap_data_control_trigger(struct aoc_chip *chip, int record_cmd);
-int ap_record_stop(struct aoc_chip *chip);
+int aoc_capture_param_configured_num(struct aoc_chip *chip);
+int ap_data_control_trigger(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream,
+			    int record_cmd);
+int ap_record_stop(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
 int aoc_capture_filter_runtime_control(struct aoc_chip *chip, uint32_t port_id, bool on);
-int aoc_audio_capture_runtime_trigger(struct aoc_chip *chip, int ep_id,
-	 int dst, bool on);
+int aoc_audio_capture_runtime_trigger(struct aoc_chip *chip, int ep_id, int dst, bool on);
 int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable);
 int aoc_eraser_aec_reference_set(struct aoc_chip *chip, long ref_source);
 
