@@ -76,6 +76,11 @@ static int snd_aoc_ctl_info(struct snd_kcontrol *kcontrol,
 		uinfo->count = NUM_OF_BUILTIN_MIC;
 		uinfo->value.integer.min = -1;
 		uinfo->value.integer.max = NUM_OF_BUILTIN_MIC - 1;
+	} else if (kcontrol->private_value == BUILDIN_US_MIC_CAPTURE_LIST) {
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+		uinfo->count = NUM_OF_BUILTIN_MIC;
+		uinfo->value.integer.min = -1;
+		uinfo->value.integer.max = NUM_OF_BUILTIN_MIC - 1;
 	} else if (kcontrol->private_value == A2DP_ENCODER_PARAMETERS) {
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
 		uinfo->count = sizeof(struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG);
@@ -169,6 +174,42 @@ snd_aoc_buildin_mic_capture_list_ctl_put(struct snd_kcontrol *kcontrol,
 	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
 		chip->buildin_mic_id_list[i] =
 			ucontrol->value.integer.value[i]; // geting power state;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int
+snd_aoc_buildin_us_mic_capture_list_ctl_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
+		ucontrol->value.integer.value[i] =
+			chip->buildin_us_mic_id_list[i];
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int
+snd_aoc_buildin_us_mic_capture_list_ctl_put(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
+		chip->buildin_us_mic_id_list[i] =
+			ucontrol->value.integer.value[i];
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -1650,6 +1691,17 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.info = snd_aoc_ctl_info,
 		.get = snd_aoc_buildin_mic_capture_list_ctl_get,
 		.put = snd_aoc_buildin_mic_capture_list_ctl_put,
+		.count = 1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "BUILDIN US MIC ID CAPTURE LIST",
+		.index = 0,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.private_value = BUILDIN_US_MIC_CAPTURE_LIST,
+		.info = snd_aoc_ctl_info,
+		.get = snd_aoc_buildin_us_mic_capture_list_ctl_get,
+		.put = snd_aoc_buildin_us_mic_capture_list_ctl_put,
 		.count = 1,
 	},
 	{

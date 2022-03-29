@@ -162,6 +162,7 @@ enum {
 	PCM_PLAYBACK_MUTE,
 	BUILDIN_MIC_POWER_STATE,
 	BUILDIN_MIC_CAPTURE_LIST,
+	BUILDIN_US_MIC_CAPTURE_LIST,
 	A2DP_ENCODER_PARAMETERS,
 };
 
@@ -207,6 +208,7 @@ struct aoc_chip {
 
 	int default_mic_id;
 	int buildin_mic_id_list[NUM_OF_BUILTIN_MIC];
+	int buildin_us_mic_id_list[NUM_OF_BUILTIN_MIC];
 
 	int default_sink_id;
 	int sink_id_list[MAX_NUM_OF_SINKS_PER_STREAM];
@@ -336,10 +338,9 @@ int aoc_mic_dc_blocker_set(struct aoc_chip *chip, int enable);
 
 int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val);
 int aoc_mic_record_gain_set(struct aoc_chip *chip, long val);
-int aoc_audio_capture_mic_prepare(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
-int aoc_audio_capture_mic_close(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
+int aoc_audio_capture_mic_prepare(struct aoc_chip *chip);
+int aoc_audio_capture_mic_close(struct aoc_chip *chip);
 int aoc_audio_capture_active_stream_num(struct aoc_chip *chip);
-int aoc_capture_param_configured_num(struct aoc_chip *chip);
 int ap_data_control_trigger(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream,
 			    int record_cmd);
 int ap_record_stop(struct aoc_chip *chip, struct aoc_alsa_stream *alsa_stream);
