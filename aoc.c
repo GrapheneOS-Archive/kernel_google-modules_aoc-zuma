@@ -726,6 +726,10 @@ static u32 aoc_board_config_parse(struct device_node *node, u32 *board_id, u32 *
 			*board_id  = 0x30501;
 			*board_rev = 0x10000;
 			pr_info("AoC Platform: L10");
+		} else if (strncmp(board_cfg, "F10", 3) == 0) {
+			*board_id  = 0x30601;
+			*board_rev = 0x10000;
+			pr_info("AoC Platform: F10");
 		} else {
 			pr_err("Unable to identify AoC board configuration, check DT");
 			pr_info("Assuming R4/O6 board configuration");
