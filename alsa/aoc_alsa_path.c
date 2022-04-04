@@ -882,6 +882,7 @@ static int be_prepare(struct snd_pcm_substream *stream, struct snd_soc_dai *dai)
 	mutex_lock(&path_mutex);
 	switch (dai->id) {
 	case INTERNAL_MIC_TX:
+	case INTERNAL_MIC_US_TX:
 	case ERASER_TX:
 	case BT_TX:
 	case USB_TX:
@@ -918,6 +919,7 @@ static void be_shutdown(struct snd_pcm_substream *stream,
 	mutex_lock(&path_mutex);
 	switch (dai->id) {
 	case INTERNAL_MIC_TX:
+	case INTERNAL_MIC_US_TX:
 	case ERASER_TX:
 	case BT_TX:
 	case USB_TX:
