@@ -239,6 +239,7 @@ struct aoc_chip {
 	int compr_offload_volume;
 	int mic_spatial_module_enable;
 	int capture_eraser_enable;
+	int cca_module_loaded;
 	int sidetone_enable;
 	int mic_loopback_enabled;
 	unsigned int opened;
@@ -348,6 +349,8 @@ int aoc_capture_filter_runtime_control(struct aoc_chip *chip, uint32_t port_id, 
 int aoc_audio_capture_runtime_trigger(struct aoc_chip *chip, int ep_id, int dst, bool on);
 int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable);
 int aoc_eraser_aec_reference_set(struct aoc_chip *chip, long ref_source);
+
+int aoc_load_cca_module(struct aoc_chip *chip, long load);
 
 int aoc_voice_call_mic_mute(struct aoc_chip *chip, int mute);
 int aoc_incall_capture_enable_get(struct aoc_chip *chip, int stream, long *val);
