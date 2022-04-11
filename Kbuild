@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 
-ccflags-y	+= -I$(srctree)/../gs/google-modules/aoc_ipc
-ccflags-y	+= -I$(srctree)/../gs/google-modules/soc-modules/drivers/dma-buf/heaps
+ccflags-y	+= -I$(srctree)/../private/google-modules/aoc_ipc
+ccflags-y	+= -I$(srctree)/../private/google-modules/soc/gs/drivers/dma-buf/heaps
 ccflags-y	+= -I$(srctree)/drivers/dma-buf
 
 obj-$(CONFIG_WC_MBOX)			+= mailbox-wc.o
