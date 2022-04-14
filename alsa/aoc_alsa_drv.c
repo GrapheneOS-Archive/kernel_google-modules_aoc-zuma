@@ -26,6 +26,8 @@ struct aoc_service_resource {
 	int ref;
 	bool waiting;
 	wait_queue_head_t wait_head;
+	service_event_cb_t event_callback;
+	void *prvdata;
 };
 
 /* TODO: audio_haptics should be added, capture1-3 needs to be determined */
@@ -44,13 +46,21 @@ static const char *const audio_service_names[] = {
 	"audio_capture1",
 	"audio_capture2",
 	"audio_capture3",
+	"ultrasonic_capture",
 	"audio_voip_rx",
 	"audio_voip_tx",
 	"audio_incall_pb_0",
 	"audio_incall_pb_1",
+	"audio_incall_pb_2",
 	"audio_incall_cap_0",
 	"audio_incall_cap_1",
 	"audio_incall_cap_2",
+	"decoder_eof",
+	"audio_raw",
+	"audio_hifiin",
+	"audio_hifiout",
+	"audio_android_aec",
+	"audio_ultrasonic",
 	NULL,
 };
 
@@ -63,13 +73,19 @@ static bool drv_registered;
 static bool aoc_audio_online;
 static wait_queue_head_t aoc_audio_state_wait_head;
 
+static void compressed_offload_isr(struct aoc_service_dev *dev)
+{
+	aoc_compr_offload_isr(dev);
+}
+
 int8_t aoc_audio_service_num(void)
 {
 	return n_services;
 }
-EXPORT_SYMBOL(aoc_audio_service_num);
+EXPORT_SYMBOL_GPL(aoc_audio_service_num);
 
-int alloc_aoc_audio_service(const char *name, struct aoc_service_dev **dev)
+int alloc_aoc_audio_service(const char *name, struct aoc_service_dev **dev, service_event_cb_t cb,
+		void *cookies)
 {
 	int i, err = -EINVAL;
 
@@ -101,6 +117,8 @@ int alloc_aoc_audio_service(const char *name, struct aoc_service_dev **dev)
 	}
 
 	*dev = service_lists[i].dev;
+	service_lists[i].event_callback = cb;
+	service_lists[i].prvdata = cookies;
 	service_lists[i].ref++;
 	err = 0;
 
@@ -109,7 +127,7 @@ done:
 
 	return err;
 }
-EXPORT_SYMBOL(alloc_aoc_audio_service);
+EXPORT_SYMBOL_GPL(alloc_aoc_audio_service);
 
 int free_aoc_audio_service(const char *name, struct aoc_service_dev *dev)
 {
@@ -143,6 +161,8 @@ int free_aoc_audio_service(const char *name, struct aoc_service_dev *dev)
 	}
 
 	service_lists[i].ref--;
+	service_lists[i].event_callback = NULL;
+	service_lists[i].prvdata = NULL;
 
 	/* Wake up the remove thread if necessary */
 	if (service_lists[i].ref == 0 &&
@@ -159,7 +179,7 @@ done:
 
 	return err;
 }
-EXPORT_SYMBOL(free_aoc_audio_service);
+EXPORT_SYMBOL_GPL(free_aoc_audio_service);
 
 __poll_t aoc_audio_state_poll(struct file *f, poll_table *wait,
 		struct aoc_state_client_t *client)
@@ -175,13 +195,13 @@ __poll_t aoc_audio_state_poll(struct file *f, poll_table *wait,
 
 	return 0;
 }
-EXPORT_SYMBOL(aoc_audio_state_poll);
+EXPORT_SYMBOL_GPL(aoc_audio_state_poll);
 
 bool aoc_audio_current_state(void)
 {
     return aoc_audio_online;
 }
-EXPORT_SYMBOL(aoc_audio_current_state);
+EXPORT_SYMBOL_GPL(aoc_audio_current_state);
 
 struct aoc_state_client_t *alloc_audio_state_client(void)
 {
@@ -198,13 +218,13 @@ struct aoc_state_client_t *alloc_audio_state_client(void)
 
 	return client;
 }
-EXPORT_SYMBOL(alloc_audio_state_client);
+EXPORT_SYMBOL_GPL(alloc_audio_state_client);
 
 void free_audio_state_client(struct aoc_state_client_t *client)
 {
 	kfree(client);
 }
-EXPORT_SYMBOL(free_audio_state_client);
+EXPORT_SYMBOL_GPL(free_audio_state_client);
 
 static int snd_aoc_alsa_probe(void)
 {
@@ -240,6 +260,18 @@ static int snd_aoc_alsa_probe(void)
 		goto out;
 	}
 
+	err = aoc_incall_init();
+	if (err) {
+		pr_err("ERR: fail to init aoc incall driver\n");
+		goto out;
+	}
+
+	err = aoc_voip_init();
+	if (err) {
+		pr_err("ERR: fail to init aoc voip driver\n");
+		goto out;
+	}
+
 	return 0;
 
 out:
@@ -248,6 +280,8 @@ out:
 
 static int snd_aoc_alsa_remove(void)
 {
+	aoc_voip_exit();
+	aoc_incall_exit();
 	aoc_nohost_exit();
 	aoc_path_exit();
 	aoc_compr_exit();
@@ -278,6 +312,8 @@ static int aoc_alsa_probe(struct aoc_service_dev *dev)
 
 	service_lists[i].dev = dev;
 	service_lists[i].ref = 0;
+	service_lists[i].event_callback = NULL;
+	service_lists[i].prvdata = NULL;
 	service_lists[i].waiting = false;
 	pr_notice("services %d: %s vs. %s\n", n_services,
 		  service_lists[i].name, dev_name(&dev->dev));
@@ -299,6 +335,9 @@ static int aoc_alsa_probe(struct aoc_service_dev *dev)
 		drv_registered = true;
 		pr_notice("alsa-aoc communication is ready!\n");
 	}
+
+	if (strcmp(dev_name(&dev->dev), AOC_COMPR_OFFLOAD_SERVICE) == 0)
+		dev->handler = compressed_offload_isr;
 
 	return 0;
 }
@@ -327,6 +366,9 @@ static int aoc_alsa_remove(struct aoc_service_dev *dev)
 		wake_up(&aoc_audio_state_wait_head);
 	}
 
+	if (service_lists[i].event_callback)
+		service_lists[i].event_callback(AOC_SERVICE_EVENT_DOWN, service_lists[i].prvdata);
+
 	if (service_lists[i].ref < 0) {
 		pr_warn("%s: invalid ref %d for %s\n", __func__,
 			service_lists[i].ref, dev_name(&dev->dev));
@@ -347,8 +389,7 @@ static int aoc_alsa_remove(struct aoc_service_dev *dev)
 	 * We should block the remove function until the ref
 	 * is 0, otherwise, it might cause "use after free".
 	 */
-	wait_event(service_lists[i].wait_head,
-		   service_lists[i].ref == 0);
+	wait_event(service_lists[i].wait_head, service_lists[i].ref == 0);
 
 	pr_info("alsa wait %s done\n", dev_name(&dev->dev));
 	spin_lock(&service_lock);

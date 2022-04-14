@@ -33,6 +33,11 @@
 #include "aoc_alsa.h"
 #include "google-aoc-enum.h"
 
+static const char *aoc_detect[] = {
+	"aoc_audio_state",
+	"aoc_aocdump_state",
+};
+
 extern int snd_soc_component_set_jack(struct snd_soc_component *component,
 				      struct snd_soc_jack *jack, void *data);
 
@@ -246,10 +251,16 @@ static const struct be_param_cache default_be_params[PORT_MAX] = {
 	MK_TDM_BE_PARAMS(TDM_1_TX, SNDRV_PCM_FORMAT_S16_LE,
 			2, 48000, 4, SNDRV_PCM_FORMAT_S32_LE)
 	MK_BE_PARAMS(INTERNAL_MIC_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
+	MK_BE_PARAMS(INTERNAL_MIC_US_TX, SNDRV_PCM_FORMAT_S32_LE, 2, 96000)
+	MK_BE_PARAMS(ERASER_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 	MK_BE_PARAMS(BT_RX, SNDRV_PCM_FORMAT_S16_LE, 1, 16000)
 	MK_BE_PARAMS(BT_TX, SNDRV_PCM_FORMAT_S16_LE, 1, 16000)
 	MK_BE_PARAMS(USB_RX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 	MK_BE_PARAMS(USB_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
+	MK_BE_PARAMS(INCALL_RX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
+	MK_BE_PARAMS(INCALL_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
+	MK_TDM_BE_PARAMS(HAPTIC_RX, SNDRV_PCM_FORMAT_S32_LE,
+			4, 48000, 4, SNDRV_PCM_FORMAT_S32_LE)
 };
 
 static struct snd_soc_dai_link_component null_component = {
@@ -932,10 +943,15 @@ MK_TDM_HW_PARAM_CTRLS(TDM_0_TX, "TDM_0_TX");
 MK_TDM_HW_PARAM_CTRLS(TDM_1_RX, "TDM_1_RX");
 MK_TDM_HW_PARAM_CTRLS(TDM_1_TX, "TDM_1_TX");
 MK_HW_PARAM_CTRLS(INTERNAL_MIC_TX, "INTERNAL_MIC_TX");
+MK_HW_PARAM_CTRLS(INTERNAL_MIC_US_TX, "INTERNAL_MIC_US_TX");
+MK_HW_PARAM_CTRLS(ERASER_TX, "ERASER_TX");
 MK_HW_PARAM_CTRLS(BT_RX, "BT_RX");
 MK_HW_PARAM_CTRLS(BT_TX, "BT_TX");
 MK_HW_PARAM_CTRLS(USB_RX, "USB_RX");
 MK_HW_PARAM_CTRLS(USB_TX, "USB_TX");
+MK_HW_PARAM_CTRLS(INCALL_RX, "INCALL_RX");
+MK_HW_PARAM_CTRLS(INCALL_TX, "INCALL_TX");
+MK_TDM_HW_PARAM_CTRLS(HAPTIC_RX, "HAPTIC_RX");
 
 /*
  * The resource array that have ALSA controls, ops and fixup
@@ -954,10 +970,15 @@ static const struct dai_link_res_map be_res_map[PORT_MAX] = {
 	MK_BE_RES_ITEM(TDM_1_RX, &aoc_tdm_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(TDM_1_TX, &aoc_tdm_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(INTERNAL_MIC_TX, &aoc_i2s_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(INTERNAL_MIC_US_TX, &aoc_i2s_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(ERASER_TX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(BT_RX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(BT_TX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(USB_RX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(USB_TX, &aoc_i2s_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(INCALL_RX, &aoc_i2s_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(INCALL_TX, &aoc_i2s_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(HAPTIC_RX, &aoc_tdm_ops, hw_params_fixup)
 };
 
 static void put_component(struct snd_soc_dai_link_component *component,
@@ -1144,19 +1165,19 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 
 	ret = of_parse_dai_cpu(dev, node, dai);
 	if (ret) {
-		pr_err("%s: fail to parse cpu %d", __func__, ret);
+		pr_err("%s: fail to parse cpu %d for %s", __func__, ret, dai->name);
 		goto exit;
 	}
 
 	ret = of_parse_dai_platform(dev, node, dai);
 	if (ret) {
-		pr_err("%s: fail to parse platform %d", __func__, ret);
+		pr_err("%s: fail to parse platform %d for %s", __func__, ret, dai->name);
 		goto exit;
 	}
 
 	ret = of_parse_dai_codec(dev, node, dai);
 	if (ret) {
-		pr_err("%s: fail to parse codec %d", __func__, ret);
+		pr_err("%s: fail to parse codec %d for %s", __func__, ret, dai->name);
 		goto exit;
 	}
 
@@ -1204,8 +1225,9 @@ static int of_parse_one_dai(struct device_node *node, struct device *dev,
 
 	daifmt = of_get_child_by_name(node, "daifmt");
 	if (daifmt) {
-		dai->dai_fmt =
-			snd_soc_of_parse_daifmt(daifmt, NULL, NULL, NULL);
+		dai->dai_fmt = snd_soc_daifmt_parse_format(daifmt, NULL);
+		dai->dai_fmt |=
+			snd_soc_daifmt_parse_clock_provider_as_flag(daifmt, NULL);
 		of_node_put(daifmt);
 		pr_debug("%s: daifmt 0x%x for %s", __func__, dai->dai_fmt,
 			dai->name);
@@ -1631,20 +1653,20 @@ err:
 	return ret;
 }
 
-static void init_audio_state_query(struct snd_soc_card *card)
+static void init_audio_state_query(struct snd_soc_card *card, const char *name)
 {
 	struct snd_info_entry *entry = NULL;
 	struct aoc_state_client_t *client;
 
 	client = alloc_audio_state_client();
 	if (!client) {
-		pr_err("fail to allocate audio state client\n");
+		pr_err("fail to allocate %s client\n", name);
 		return;
 	}
 
-	snd_card_proc_new(card->snd_card, "aoc_audio_state", &entry);
+	snd_card_proc_new(card->snd_card, name, &entry);
 	if (!entry) {
-		pr_warn("%s: fail to create aoc_state\n", __func__);
+		pr_warn("%s: fail to create entry %s\n", __func__, name);
 		free_audio_state_client(client);
 		return;
 	}
@@ -1775,7 +1797,10 @@ static int aoc_card_late_probe(struct snd_soc_card *card)
 		init_backend_control(rtd, id);
 	}
 
-	init_audio_state_query(card);
+	/* add for aocdump detect aoc SSR */
+	for (i = 0; i < ARRAY_SIZE(aoc_detect); i++)
+		init_audio_state_query(card, aoc_detect[i]);
+
 	return 0;
 }
 
@@ -1787,8 +1812,10 @@ static int snd_aoc_init(struct aoc_chip *chip)
 
 	chip->default_mic_id = DEFAULT_MICPHONE_ID;
 	chip->buildin_mic_id_list[0] = DEFAULT_MICPHONE_ID;
+	chip->buildin_us_mic_id_list[0] = DEFAULT_MICPHONE_ID;
 	for (i = 1; i < NUM_OF_BUILTIN_MIC; i++) {
 		chip->buildin_mic_id_list[i] = -1;
+		chip->buildin_us_mic_id_list[i] = -1;
 	}
 
 	chip->default_sink_id = DEFAULT_AUDIO_SINK_ID;
@@ -1800,12 +1827,28 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	chip->audio_capture_mic_source = BUILTIN_MIC;
 	chip->voice_call_mic_source = 0;
 	chip->voice_call_mic_mute = 0;
+	chip->ft_aec_ref_source = DEFAULT_PLAYBACK;
+	chip->eraser_aec_ref_source = DEFAULT_PLAYBACK;
 	chip->compr_offload_volume = 15;
 	chip->voice_call_audio_enable = 1;
 	chip->mic_spatial_module_enable = 0;
 	chip->sidetone_enable = 0;
+	chip->voip_rx_prepared = 0;
+	chip->voip_tx_prepared = 0;
+	chip->telephony_curr_mic = NULL_PATH;
+	chip->telephony_curr_sink = NULL_PATH;
+	chip->telephony_expect_mic = NULL_PATH;
+	chip->telephony_expect_sink = NULL_PATH;
+
+	chip->pcm_wait_time_in_ms = DEFAULT_PCM_WAIT_TIME_IN_MSECS;
+	chip->voice_pcm_wait_time_in_ms = DEFAULT_VOICE_PCM_WAIT_TIME_IN_MSECS;
+
+	/* Default values for playback volume and mute */
+	chip->volume = 1000;
+	chip->mute = 1;
 
 	mutex_init(&chip->audio_mutex);
+	mutex_init(&chip->audio_cmd_chan_mutex);
 	spin_lock_init(&chip->audio_lock);
 
 	return 0;
@@ -1825,7 +1868,7 @@ static int aoc_snd_card_probe(struct platform_device *pdev)
 		return -ENOSYS;
 
 	/* Check if the AoC service is up */
-	ret = alloc_aoc_audio_service(CMD_OUTPUT_CHANNEL, &aoc_dev);
+	ret = alloc_aoc_audio_service(CMD_OUTPUT_CHANNEL, &aoc_dev, NULL, NULL);
 	if (ret < 0) {
 		if (ret == -EPROBE_DEFER)
 			pr_info("%s: wait for aoc output ctrl\n", __func__);
@@ -1856,6 +1899,8 @@ static int aoc_snd_card_probe(struct platform_device *pdev)
 		pr_err("%s: Failed to init aoc chip\n", __func__);
 		goto err;
 	}
+
+	pdata->g_chip.wakelock = wakeup_source_register(dev, dev_name(dev));
 
 	card->owner = THIS_MODULE;
 	card->dev = dev;

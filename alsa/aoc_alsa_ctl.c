@@ -14,6 +14,11 @@
 /* Volume maximum and minimum */
 #define CTRL_VOL_MIN 0
 #define CTRL_VOL_MAX 1000
+#define AOC_MIC_RECORD_GAIN_IN_DB_MIN -40
+#define AOC_MIC_RECORD_GAIN_IN_DB_MAX 30
+
+#define COMPRE_OFFLOAD_GAIN_MIN 0
+#define COMPRE_OFFLOAD_GAIN_MAX 8388608 /* 2^23 = 8388608 */
 
 /*
  * Redefined the macro from soc.h so that the control value can be negative.
@@ -71,35 +76,16 @@ static int snd_aoc_ctl_info(struct snd_kcontrol *kcontrol,
 		uinfo->count = NUM_OF_BUILTIN_MIC;
 		uinfo->value.integer.min = -1;
 		uinfo->value.integer.max = NUM_OF_BUILTIN_MIC - 1;
+	} else if (kcontrol->private_value == BUILDIN_US_MIC_CAPTURE_LIST) {
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+		uinfo->count = NUM_OF_BUILTIN_MIC;
+		uinfo->value.integer.min = -1;
+		uinfo->value.integer.max = NUM_OF_BUILTIN_MIC - 1;
 	} else if (kcontrol->private_value == A2DP_ENCODER_PARAMETERS) {
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
 		uinfo->count = sizeof(struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG);
 	}
 	return 0;
-}
-
-/*
- * Toggle mute on/off depending on the value of nmute, and returns
- * 1 if the mute value was changed, otherwise 0
- */
-static int toggle_mute(struct aoc_chip *chip, int nmute)
-{
-	if (chip->mute == nmute)
-		return 0;
-
-	if (chip->mute == CTRL_VOL_MUTE) {
-		chip->volume = chip->old_volume;
-		pr_debug("Unmuting, old_volume = %d, volume = %d\n",
-			 chip->old_volume, chip->volume);
-	} else {
-		chip->old_volume = chip->volume;
-		chip->volume = 0;
-		pr_debug("Muting, old_volume = %d, volume = %d\n",
-			 chip->old_volume, chip->volume);
-	}
-
-	chip->mute = nmute;
-	return 1;
 }
 
 static int snd_aoc_ctl_get(struct snd_kcontrol *kcontrol,
@@ -119,44 +105,6 @@ static int snd_aoc_ctl_get(struct snd_kcontrol *kcontrol,
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
-}
-
-static int snd_aoc_ctl_put(struct snd_kcontrol *kcontrol,
-			   struct snd_ctl_elem_value *ucontrol)
-{
-	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
-	int changed = 0;
-
-	if (mutex_lock_interruptible(&chip->audio_mutex))
-		return -EINTR;
-
-	if (kcontrol->private_value == PCM_PLAYBACK_VOLUME) {
-		pr_debug(
-			"volume change attempted.. volume = %d new_volume = %d\n",
-			chip->volume, (int)ucontrol->value.integer.value[0]);
-		if (chip->mute == CTRL_VOL_MUTE) {
-			changed = 1;
-			goto unlock;
-		}
-		if (changed || (ucontrol->value.integer.value[0] !=
-				chip2alsa(chip->volume))) {
-			chip->volume =
-				alsa2chip(ucontrol->value.integer.value[0]);
-			changed = 1;
-		}
-	} else if (kcontrol->private_value == PCM_PLAYBACK_MUTE) {
-		pr_debug("mute attempted\n");
-		changed = toggle_mute(chip, ucontrol->value.integer.value[0]);
-	}
-
-	if (changed) {
-		if (aoc_audio_set_ctls(chip))
-			pr_err("ERR: fail in set ALSA controls\n");
-	}
-
-unlock:
-	mutex_unlock(&chip->audio_mutex);
-	return changed;
 }
 
 static int
@@ -226,6 +174,42 @@ snd_aoc_buildin_mic_capture_list_ctl_put(struct snd_kcontrol *kcontrol,
 	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
 		chip->buildin_mic_id_list[i] =
 			ucontrol->value.integer.value[i]; // geting power state;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int
+snd_aoc_buildin_us_mic_capture_list_ctl_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
+		ucontrol->value.integer.value[i] =
+			chip->buildin_us_mic_id_list[i];
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int
+snd_aoc_buildin_us_mic_capture_list_ctl_put(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
+		chip->buildin_us_mic_id_list[i] =
+			ucontrol->value.integer.value[i];
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -411,6 +395,225 @@ static int sidetone_enable_ctl_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int incall_mic_sink_mute_ctl_set(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int param = mc->shift;
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_incall_mic_sink_mute_set(chip, param, val);
+	if (err < 0)
+		pr_err("ERR:%d incall %s mute set to %d fail\n", err, (param == 0) ? "mic" : "sink",
+		       val);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_mic_sink_mute_ctl_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int param = mc->shift;
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_incall_mic_sink_mute_get(chip, param, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d incall %s mute get fail\n", err, (param == 0) ? "mic" : "sink");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_playback_mic_channel_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int stream = mc->shift;
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_incall_playback_mic_channel_set(chip, stream, val);
+	if (err < 0)
+		pr_err("ERR:%d incall playback mic source set fail for ring %d: mic %d\n", err,
+		       stream, val);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_playback_mic_channel_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int stream = mc->shift;
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_incall_playback_mic_channel_get(chip, stream, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d incall playback mic source get fail for ring %d\n", err, stream);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int mic_record_gain_ctl_set(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_mic_record_gain_set(chip, val);
+	if (err < 0)
+		pr_err("ERR:%d mic record gain set to %d fail\n", err, val);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int mic_record_gain_ctl_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_mic_record_gain_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d mic record gain get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int lvm_enable_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_lvm_enable_set(chip, val);
+	if (err < 0)
+		pr_err("ERR:%d lvm %s fail\n", err, val ? "Enable" : "Disable");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int lvm_enable_ctl_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_lvm_enable_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d lvm enable get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return err;
+}
+
+static int decoder_ref_enable_ctl_set(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_decoder_ref_enable_set(chip, val);
+	if (err < 0)
+		pr_err("ERR:%d lvm %s fail\n", err, val ? "Enable" : "Disable");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int decoder_ref_enable_ctl_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_decoder_ref_enable_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d lvm enable get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return err;
+}
+
+static int audio_capture_eraser_enable_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->capture_eraser_enable;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_capture_eraser_enable_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->capture_eraser_enable = ucontrol->value.integer.value[0];
+	err = aoc_audio_capture_eraser_enable(chip, chip->capture_eraser_enable);
+	if (err < 0)
+		pr_err("ERR:%d capture eraser %s fail\n", err,
+		       (chip->capture_eraser_enable) ? "Enable" : "Disable");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int sidetone_enable_ctl_set(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
@@ -561,9 +764,105 @@ static int compr_offload_volume_set(struct snd_kcontrol *kcontrol,
 	chip->compr_offload_volume = ucontrol->value.integer.value[0];
 
 	/* temporary solution */
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_SPEAKER);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_USB);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_BT);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_SPEAKER);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_USB);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_BT);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_compr_offload_gain_ctl_get(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_compr_offload_linear_gain_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d compr offload linear gain get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_compr_offload_gain_ctl_set(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_compr_offload_linear_gain_set(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d compr offload linear gain set fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int pcm_wait_time_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->pcm_wait_time_in_ms;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int pcm_wait_time_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val = ucontrol->value.integer.value[0];
+
+	if (val < 0 || val > DEFAULT_PCM_WAIT_TIME_IN_MSECS)
+		return -EINVAL;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->pcm_wait_time_in_ms = val;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int voice_pcm_wait_time_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->voice_pcm_wait_time_in_ms;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int voice_pcm_wait_time_set(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val = ucontrol->value.integer.value[0];
+
+	if (val < 0 || val > DEFAULT_PCM_WAIT_TIME_IN_MSECS)
+		return -EINVAL;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->voice_pcm_wait_time_in_ms = val;
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -587,6 +886,7 @@ static int audio_capture_mic_source_set(struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
 {
 	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
 
 	if (mutex_lock_interruptible(&chip->audio_mutex))
 		return -EINTR;
@@ -595,8 +895,83 @@ static int audio_capture_mic_source_set(struct snd_kcontrol *kcontrol,
 	if (chip->audio_capture_mic_source == DEFAULT_MIC)
 		chip->audio_capture_mic_source = BUILTIN_MIC;
 
+	pr_info("mic source set: %d\n", chip->audio_capture_mic_source);
+
+	if (err < 0)
+		pr_err("ERR:%d in audio capture mic source set\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return err;
+}
+
+static int eraser_aec_ref_source_get(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->eraser_aec_ref_source;
+
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
+}
+
+static int eraser_aec_ref_source_set(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	if (ucontrol->value.integer.value[0] < NUM_AEC_REF_SOURCE) {
+		chip->eraser_aec_ref_source = ucontrol->value.integer.value[0];
+		err = aoc_eraser_aec_reference_set(chip, chip->eraser_aec_ref_source);
+		if (err < 0)
+			pr_err("ERR:%d in Eraser aec ref source set\n", err);
+	} else {
+		err = -EINVAL;
+		pr_err("ERR:%d invalid ft aec ref source\n", err);
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int ft_aec_ref_source_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->ft_aec_ref_source;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int ft_aec_ref_source_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	if (ucontrol->value.integer.value[0] < NUM_AEC_REF_SOURCE)
+		chip->ft_aec_ref_source = ucontrol->value.integer.value[0];
+	else {
+		err = -EINVAL;
+		pr_err("ERR:%d invalid ft aec ref source\n", err);
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
 }
 
 static int voice_call_mic_source_get(struct snd_kcontrol *kcontrol,
@@ -712,6 +1087,11 @@ static int mic_spatial_module_enable_set(struct snd_kcontrol *kcontrol,
 
 	chip->mic_spatial_module_enable = ucontrol->value.integer.value[0];
 
+	if (chip->mic_spatial_module_enable)
+		aoc_spatial_module_start(chip);
+	else
+		aoc_spatial_module_stop(chip);
+
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
 }
@@ -766,6 +1146,36 @@ static int aoc_asp_mode_ctl_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int aoc_audio_dsp_mode_ctl_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	aoc_get_audio_dsp_mode(chip, (long *)&(ucontrol->value.enumerated.item[0]));
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_dsp_mode_ctl_set(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	aoc_set_audio_dsp_mode(chip, ucontrol->value.enumerated.item[0]);
+
+	pr_debug("Audio dsp mode set: %d", ucontrol->value.enumerated.item[0]);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 static int
 aoc_builtin_mic_process_mode_ctl_get(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
@@ -777,6 +1187,24 @@ aoc_builtin_mic_process_mode_ctl_get(struct snd_kcontrol *kcontrol,
 
 	ucontrol->value.enumerated.item[0] =
 		aoc_get_builtin_mic_process_mode(chip);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_builtin_mic_process_mode_ctl_set(struct snd_kcontrol *kcontrol,
+						struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int mode, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	mode = ucontrol->value.enumerated.item[0];
+	err = aoc_set_builtin_mic_process_mode(chip, mode);
+	if (err < 0)
+		pr_err("ERR:%d builtin mic process mode set to %d fail", err, mode);
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -856,6 +1284,9 @@ static int usb_cfg_ctl_get(struct snd_kcontrol *kcontrol,
 	case USB_RX_BW:
 		val = chip->usb_sink_cfg.rx_width;
 		break;
+	case USB_CFG_TO_AOC:
+		val = 0;
+		break;
 	default:
 		val = -1;
 		pr_err("ERR: incorrect index for USB config in %s\n", __func__);
@@ -867,12 +1298,10 @@ static int usb_cfg_ctl_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int usb_cfg_ctl_set(struct snd_kcontrol *kcontrol,
-			   struct snd_ctl_elem_value *ucontrol)
+static int usb_cfg_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
 	u32 idx = (u32)mc->shift;
 	int err = 0;
 	int val = ucontrol->value.enumerated.item[0];
@@ -908,12 +1337,139 @@ static int usb_cfg_ctl_set(struct snd_kcontrol *kcontrol,
 	case USB_RX_BW:
 		chip->usb_sink_cfg.rx_width = val;
 		break;
+	case USB_CFG_TO_AOC:
+		err = aoc_set_usb_config(chip);
+		if (err < 0)
+			pr_err("ERR:%d fail to update aoc usb config!\n", err);
+		break;
 	default:
-		pr_err("ERR: incorrect index for USB config in %s\n", __func__);
+		err = -EINVAL;
+		pr_err("ERR: %d incorrect index for USB config\n", err);
 	}
 
-	if ((err = aoc_set_usb_config(chip)))
-		pr_err("ERR:%d fail to update aoc usb config!\n", err);
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int usb_cfg_v2_ctl_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	u32 idx = (u32)mc->shift;
+	int val;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	switch (idx) {
+	case USB_BUS_ID:
+		val = chip->usb_sink_cfg_v2.bus_id;
+		break;
+	case USB_DEV_ID:
+		val = chip->usb_sink_cfg_v2.dev_num;
+		break;
+	case USB_TX_EP_ID:
+		val = chip->usb_sink_cfg_v2.tx_ep_num;
+		break;
+	case USB_TX_FORMAT:
+		val = chip->usb_sink_cfg_v2.tx_format;
+		break;
+	case USB_TX_SR:
+		val = chip->usb_sink_cfg_v2.tx_sr;
+		break;
+	case USB_TX_CH:
+		val = chip->usb_sink_cfg_v2.tx_ch;
+		break;
+	case USB_TX_BW:
+		val = chip->usb_sink_cfg_v2.tx_width;
+		break;
+	case USB_RX_EP_ID:
+		val = chip->usb_sink_cfg_v2.rx_ep_num;
+		break;
+	case USB_RX_FORMAT:
+		val = chip->usb_sink_cfg_v2.rx_format;
+		break;
+	case USB_RX_SR:
+		val = chip->usb_sink_cfg_v2.rx_sr;
+		break;
+	case USB_RX_CH:
+		val = chip->usb_sink_cfg_v2.rx_ch;
+		break;
+	case USB_RX_BW:
+		val = chip->usb_sink_cfg_v2.rx_width;
+		break;
+	case USB_CFG_TO_AOC:
+		val = 0;
+		break;
+	default:
+		val = -1;
+		pr_err("ERR: incorrect index for USB config v2 in %s\n", __func__);
+	}
+
+	ucontrol->value.enumerated.item[0] = val;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int usb_cfg_v2_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	u32 idx = (u32)mc->shift;
+	int err = 0;
+	int val = ucontrol->value.enumerated.item[0];
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	switch (idx) {
+	case USB_BUS_ID:
+		chip->usb_sink_cfg_v2.bus_id = val;
+		break;
+	case USB_DEV_ID:
+		chip->usb_sink_cfg_v2.dev_num = val;
+		break;
+	case USB_TX_EP_ID:
+		chip->usb_sink_cfg_v2.tx_ep_num = val;
+		break;
+	case USB_TX_FORMAT:
+		chip->usb_sink_cfg_v2.tx_format = val;
+		break;
+	case USB_TX_SR:
+		chip->usb_sink_cfg_v2.tx_sr = val;
+		break;
+	case USB_TX_CH:
+		chip->usb_sink_cfg_v2.tx_ch = val;
+		break;
+	case USB_TX_BW:
+		chip->usb_sink_cfg_v2.tx_width = val;
+		break;
+	case USB_RX_EP_ID:
+		chip->usb_sink_cfg_v2.rx_ep_num = val;
+		break;
+	case USB_RX_FORMAT:
+		chip->usb_sink_cfg_v2.rx_format = val;
+		break;
+	case USB_RX_SR:
+		chip->usb_sink_cfg_v2.rx_sr = val;
+		break;
+	case USB_RX_CH:
+		chip->usb_sink_cfg_v2.rx_ch = val;
+		break;
+	case USB_RX_BW:
+		chip->usb_sink_cfg_v2.rx_width = val;
+		break;
+	case USB_CFG_TO_AOC:
+		err = aoc_set_usb_config_v2(chip);
+		if (err < 0)
+			pr_err("ERR:%d fail to update aoc usb config v2!\n", err);
+		break;
+	default:
+		err = -EINVAL;
+		pr_err("ERR: %d incorrect index for USB config v2\n", err);
+	}
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1003,6 +1559,25 @@ static int a2dp_encoder_parameters_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int us_record_ctl_get(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int us_record_ctl_set(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	aoc_audio_us_record(chip, ucontrol->value.integer.value[0]);
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 /* TODO: this has to be consistent to enum APMicProcessIndex in aoc-interface.h */
 static const char *builtin_mic_process_mode_texts[] = { "Raw", "Spatial" };
 static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
@@ -1011,8 +1586,10 @@ static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
 /* TODO: this has to be consistent to BT/USB Mode enum in aoc_alsa.h */
 static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
 				       "ESCO",	       "A2DP_RAW",
-				       "A2DP_ENC_SBC", "A2DP_ENC_AAC" };
-static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, ASNK_BT, bt_mode_texts);
+				       "A2DP_ENC_SBC", "A2DP_ENC_AAC",
+				       "A2DP_ENC_LC3", "BLE_ENC_LC3",
+				       "BLE_CONVERSATION" };
+static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
 /* TODO: seek better way to create a series of controls  */
 static const char *block_asp_mode_texts[] = { "ASP_OFF", "ASP_ON", "ASP_BYPASS",
@@ -1040,6 +1617,10 @@ static SOC_ENUM_SINGLE_DECL(sink_3_state_enum, 1, 3,
 static SOC_ENUM_SINGLE_DECL(sink_4_state_enum, 1, 4,
 			    sink_processing_state_texts);
 
+/* audio dsp state switch */
+static const char *audio_dsp_state_switch_texts[] = { "Ambient", "Record", "Telephony"};
+static SOC_ENUM_SINGLE_DECL(audio_dsp_state_switch_enum, 1, 0, audio_dsp_state_switch_texts);
+
 /* incall capture stream state */
 static const char *incall_capture_stream_texts[] = { "Off", "UL", "DL", "UL_DL" };
 static SOC_ENUM_SINGLE_DECL(incall_capture_stream0_enum, 1, 0, incall_capture_stream_texts);
@@ -1048,7 +1629,7 @@ static SOC_ENUM_SINGLE_DECL(incall_capture_stream2_enum, 1, 2, incall_capture_st
 
 /* audio capture mic source */
 static const char *audio_capture_mic_source_texts[] = { "Default", "Builtin_MIC", "USB_MIC",
-						       "BT_MIC" };
+						       "BT_MIC", "No MIC", "ERASER" };
 static SOC_ENUM_SINGLE_DECL(audio_capture_mic_source_enum, 1, 0, audio_capture_mic_source_texts);
 
 /* Voice call mic source */
@@ -1056,6 +1637,15 @@ static const char *voice_call_mic_source_texts[] = { "Default", "Builtin_MIC", "
 						     "IN_CALL_MUSIC" };
 static SOC_ENUM_SINGLE_DECL(voice_call_mic_source_enum, 1, 0,
 			    voice_call_mic_source_texts);
+
+/* AEC reference source */
+static const char *eraser_aec_ref_source_texts[NUM_AEC_REF_SOURCE] = { "Default", "SPEAKER", "USB",
+								       "BT" };
+static SOC_ENUM_SINGLE_DECL(eraser_aec_ref_source_enum, 1, 0, eraser_aec_ref_source_texts);
+
+static const char *ft_aec_ref_source_texts[NUM_AEC_REF_SOURCE] = { "Default", "SPEAKER", "USB",
+								   "BT" };
+static SOC_ENUM_SINGLE_DECL(ft_aec_ref_source_enum, 1, 0, ft_aec_ref_source_texts);
 
 static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	{
@@ -1067,7 +1657,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.private_value = PCM_PLAYBACK_VOLUME,
 		.info = snd_aoc_ctl_info,
 		.get = snd_aoc_ctl_get,
-		.put = snd_aoc_ctl_put,
+		.put = NULL,
 		.count = 1,
 	},
 	{
@@ -1078,7 +1668,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.private_value = PCM_PLAYBACK_MUTE,
 		.info = snd_aoc_ctl_info,
 		.get = snd_aoc_ctl_get,
-		.put = snd_aoc_ctl_put,
+		.put = NULL,
 		.count = 1,
 	},
 	{
@@ -1105,6 +1695,17 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	},
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "BUILDIN US MIC ID CAPTURE LIST",
+		.index = 0,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.private_value = BUILDIN_US_MIC_CAPTURE_LIST,
+		.info = snd_aoc_ctl_info,
+		.get = snd_aoc_buildin_us_mic_capture_list_ctl_get,
+		.put = snd_aoc_buildin_us_mic_capture_list_ctl_put,
+		.count = 1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Audio DSP State",
 		.index = 0,
 		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
@@ -1126,8 +1727,12 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_ENUM_EXT("AoC Modem Downlink ASRC Mode", block_19_15_1_state_enum,
 		     aoc_asp_mode_ctl_get, aoc_asp_mode_ctl_set),
 
+	SOC_ENUM_EXT("Audio DSP Mode", audio_dsp_state_switch_enum,
+		     aoc_audio_dsp_mode_ctl_get, aoc_audio_dsp_mode_ctl_set),
+
+
 	SOC_ENUM_EXT("BUILTIN MIC Process Mode", builtin_mic_process_mode_enum,
-		     aoc_builtin_mic_process_mode_ctl_get, NULL),
+		     aoc_builtin_mic_process_mode_ctl_get, aoc_builtin_mic_process_mode_ctl_set),
 
 	SOC_ENUM_EXT("BT Mode", bt_mode_enum, aoc_sink_mode_ctl_get,
 		     aoc_sink_mode_ctl_set),
@@ -1150,6 +1755,35 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		       usb_cfg_ctl_get, usb_cfg_ctl_set),
 	SOC_SINGLE_EXT("USB Capture BW", SND_SOC_NOPM, USB_RX_BW, 32, 0,
 		       usb_cfg_ctl_get, usb_cfg_ctl_set),
+	SOC_SINGLE_EXT("USB Config To AoC", SND_SOC_NOPM, USB_CFG_TO_AOC, 1, 0,
+		       usb_cfg_ctl_get, usb_cfg_ctl_set),
+
+	SOC_SINGLE_EXT("USB Bus ID v2", SND_SOC_NOPM, USB_BUS_ID, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Dev ID v2", SND_SOC_NOPM, USB_DEV_ID, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Playback EP ID v2", SND_SOC_NOPM, USB_TX_EP_ID, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Playback FORMAT v2", SND_SOC_NOPM, USB_TX_FORMAT, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Playback SR v2", SND_SOC_NOPM, USB_TX_SR, 48000, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Playback CH v2", SND_SOC_NOPM, USB_TX_CH, 2, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Playback BW v2", SND_SOC_NOPM, USB_TX_BW, 32, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Capture EP ID v2", SND_SOC_NOPM, USB_RX_EP_ID, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Capture FORMAT v2", SND_SOC_NOPM, USB_RX_FORMAT, 100, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Capture SR v2", SND_SOC_NOPM, USB_RX_SR, 48000, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Capture CH v2", SND_SOC_NOPM, USB_RX_CH, 2, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Capture BW v2", SND_SOC_NOPM, USB_RX_BW, 32, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Config To AoC v2", SND_SOC_NOPM, USB_CFG_TO_AOC, 1, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
 
 	SOC_ENUM_EXT("Audio Sink 0 Processing State", sink_0_state_enum,
 		     aoc_sink_state_ctl_get, NULL),
@@ -1174,8 +1808,17 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("AoC USB Sink Channel Bitmap", SND_SOC_NOPM, 4, 0x00ffff,
 		       0, aoc_sink_channel_bitmap_ctl_get, NULL),
 
+	SOC_SINGLE_EXT("Audio Capture Eraser Enable", SND_SOC_NOPM, 0, 1, 0,
+		       audio_capture_eraser_enable_ctl_get, audio_capture_eraser_enable_ctl_set),
+
 	SOC_ENUM_EXT("Audio Capture Mic Source", audio_capture_mic_source_enum,
 		     audio_capture_mic_source_get, audio_capture_mic_source_set),
+
+	SOC_ENUM_EXT("Eraser AEC Reference Source", eraser_aec_ref_source_enum,
+		     eraser_aec_ref_source_get, eraser_aec_ref_source_set),
+
+	SOC_ENUM_EXT("FT AEC Reference Source", ft_aec_ref_source_enum,
+		     ft_aec_ref_source_get, ft_aec_ref_source_set),
 
 	SOC_ENUM_EXT("Voice Call Mic Source", voice_call_mic_source_enum,
 		     voice_call_mic_source_get, voice_call_mic_source_set),
@@ -1229,6 +1872,29 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		MIC_HW_GAIN_IN_CB_MIN, MIC_HW_GAIN_IN_CB_MAX, 0,
 		mic_hw_gain_get, NULL, NULL),
 
+	/* Incall mic and sink mute */
+	SOC_SINGLE_EXT("Incall Mic Mute", SND_SOC_NOPM, 0, 1, 0, incall_mic_sink_mute_ctl_get,
+		       incall_mic_sink_mute_ctl_set),
+	SOC_SINGLE_EXT("Incall Sink Mute", SND_SOC_NOPM, 1, 1, 0, incall_mic_sink_mute_ctl_get,
+		       incall_mic_sink_mute_ctl_set),
+
+	/* Incall playback0 and playback1 mic source choice */
+	SOC_SINGLE_EXT("Incall Playback0 Mic Channel", SND_SOC_NOPM, 0, 2, 0, incall_playback_mic_channel_ctl_get,
+		       incall_playback_mic_channel_ctl_set),
+	SOC_SINGLE_EXT("Incall Playback1 Mic Channel", SND_SOC_NOPM, 1, 2, 0, incall_playback_mic_channel_ctl_get,
+		       incall_playback_mic_channel_ctl_set),
+
+	/* UltraSonic Record enable */
+	SOC_SINGLE_EXT("US Record Enable", SND_SOC_NOPM, 0, 1, 0,
+		       us_record_ctl_get, us_record_ctl_set),
+
+
+	/* LVM enable 1/0 for comp offload */
+	SOC_SINGLE_EXT("LVM Enable", SND_SOC_NOPM, 0, 1, 0,
+		       lvm_enable_ctl_get, lvm_enable_ctl_set),
+	SOC_SINGLE_EXT("Decoder Reference Enable", SND_SOC_NOPM, 0, 1, 0,
+		       decoder_ref_enable_ctl_get, decoder_ref_enable_ctl_set),
+
 	/* Sidetone switch and tuning parameters */
 	SOC_SINGLE_EXT("Sidetone Enable", SND_SOC_NOPM, 0, 1, 0,
 		       sidetone_enable_ctl_get, sidetone_enable_ctl_set),
@@ -1266,13 +1932,29 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 					  SIDETONE_BIQUAD_PARAM_NUM, aoc_sidetone_eq_ctl_get,
 					  aoc_sidetone_eq_ctl_set, NULL),
 
-	SOC_SINGLE_EXT("MIC Recording Gain (dB)", SND_SOC_NOPM, 0, 100, 0, NULL,
-		       NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("MIC Record Soft Gain (dB)", SND_SOC_NOPM, 0,
+					  AOC_MIC_RECORD_GAIN_IN_DB_MIN,
+					  AOC_MIC_RECORD_GAIN_IN_DB_MAX, 1, mic_record_gain_ctl_get,
+					  mic_record_gain_ctl_set, NULL),
+
 	SOC_SINGLE_EXT("Compress Offload Volume", SND_SOC_NOPM, 0, 100, 0, compr_offload_volume_get,
 		       compr_offload_volume_set),
+
+	SOC_SINGLE_RANGE_EXT_TLV_modified("Compress Offload Gain (L and R)", SND_SOC_NOPM, 0,
+					  COMPRE_OFFLOAD_GAIN_MIN, COMPRE_OFFLOAD_GAIN_MAX, 2,
+					  aoc_compr_offload_gain_ctl_get,
+					  aoc_compr_offload_gain_ctl_set, NULL),
+
 	SOC_SINGLE_EXT("Voice Call Rx Volume", SND_SOC_NOPM, 0, 100, 0, NULL,
 		       NULL),
 	SOC_SINGLE_EXT("VOIP Rx Volume", SND_SOC_NOPM, 0, 100, 0, NULL, NULL),
+
+	SOC_SINGLE_EXT("PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0, pcm_wait_time_get,
+		       pcm_wait_time_set),
+
+	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0,
+		voice_pcm_wait_time_get, voice_pcm_wait_time_set),
+
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "A2DP Encoder Parameters",
@@ -1300,4 +1982,4 @@ int snd_aoc_new_ctl(struct aoc_chip *chip)
 
 	return 0;
 }
-EXPORT_SYMBOL(snd_aoc_new_ctl);
+EXPORT_SYMBOL_GPL(snd_aoc_new_ctl);
