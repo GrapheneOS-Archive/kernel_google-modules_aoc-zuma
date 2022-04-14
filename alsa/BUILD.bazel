@@ -1,0 +1,34 @@
+# NOTE: THIS FILE IS EXPERIMENTAL FOR THE BAZEL MIGRATION AND NOT USED FOR
+# YOUR BUILDS CURRENTLY.
+#
+# It is not yet the source of truth for your build. If you're looking to modify
+# the build file, modify the Android.bp file instead. Do *not* modify this file
+# unless you have coordinated with the team managing the Soong to Bazel
+# migration.
+
+load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+
+kernel_module(
+    name = "alsa.slider",
+    srcs = glob([
+        "**/*.c",
+        "**/*.h",
+        "Kbuild",
+    ]) + [
+        "//gs/google-modules/aoc_ipc:headers",
+        "//gs/google-modules/aoc:headers",
+        "//gs/google-modules/soc-modules:gs101_soc_headers",
+    ],
+    outs = [
+        "aoc_alsa_dev.ko",
+        "aoc_alsa_dev_util.ko",
+    ],
+    kernel_build = "//gs/google-modules/soc-modules:slider",
+    kernel_module_deps = [
+        "//gs/google-modules/aoc:aoc.slider",
+        "//gs/google-modules/soc-modules:gs101_soc",
+    ],
+    visibility = [
+        "//gs/google-modules/soc-modules:__pkg__",
+    ],
+)

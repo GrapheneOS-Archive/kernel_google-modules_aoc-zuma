@@ -1,22 +1,14 @@
-obj-$(CONFIG_WC_MBOX) += mailbox-wc.o
-
-obj-$(CONFIG_AOC_DRIVER)	+= aoc_core.o
-aoc_core-objs := aoc.o ../aoc_ipc/aoc_ipc_core.o aoc_firmware.o ion_physical_heap.o
-
-obj-$(CONFIG_AOC_CHAR_DRIVER)   += aoc_char_dev.o
-obj-$(CONFIG_AOC_CONTROL_DRIVER)   += aoc_control_dev.o
-obj-$(CONFIG_AOC_CHAN_DRIVER)   += aoc_channel_dev.o
-obj-$(CONFIG_AOC_UWB_DRIVER)   += aoc_uwb_platform_drv.o aoc_uwb_service_dev.o
+# SPDX-License-Identifier: GPL-2.0
 
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
-KBUILD_OPTIONS += CONFIG_AOC_DRIVER=m CONFIG_WC_MBOX=m \
+KBUILD_OPTIONS	+= CONFIG_AOC_DRIVER=m CONFIG_WC_MBOX=m \
 		  CONFIG_AOC_CHAR_DRIVER=m CONFIG_AOC_CHAN_DRIVER=m \
 		  CONFIG_AOC_CONTROL_DRIVER=m CONFIG_AOC_UWB_DRIVER=m \
 
-ccflags-y := -I$(KERNEL_SRC)/../google-modules/aoc_ipc
-headers-y := uapi/aoc.h
+include $(KERNEL_SRC)/../gs/google-modules/soc-modules/Makefile.include
 
 modules modules_install clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) W=1 $(@)
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \
+	$(KBUILD_OPTIONS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" $(@)

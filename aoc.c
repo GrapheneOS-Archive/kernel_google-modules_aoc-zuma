@@ -223,7 +223,7 @@ const static struct dev_pm_ops aoc_core_pm_ops = {
 
 static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
-static int aoc_bus_remove(struct device *dev);
+static void aoc_bus_remove(struct device *dev);
 
 static struct bus_type aoc_bus_type = {
 	.name = "aoc",
@@ -1823,18 +1823,15 @@ static int aoc_bus_probe(struct device *dev)
 	return driver->probe(the_dev);
 }
 
-static int aoc_bus_remove(struct device *dev)
+static void aoc_bus_remove(struct device *dev)
 {
 	struct aoc_service_dev *aoc_dev = AOC_DEVICE(dev);
 	struct aoc_driver *drv = AOC_DRIVER(dev->driver);
-	int ret = -EINVAL;
 
 	pr_notice("bus remove %s\n", dev_name(dev));
 
 	if (drv->remove)
-		ret = drv->remove(aoc_dev);
-
-	return ret;
+		drv->remove(aoc_dev);
 }
 
 int aoc_driver_register(struct aoc_driver *driver)
@@ -2089,7 +2086,7 @@ static void aoc_did_become_online(struct work_struct *work)
 	struct aoc_prvdata *prvdata =
 		container_of(work, struct aoc_prvdata, online_work);
 	struct device *dev = prvdata->dev;
-	int i, s;
+	int i, s, ret;
 
 	cancel_delayed_work_sync(&prvdata->monitor_work);
 
@@ -2135,8 +2132,12 @@ static void aoc_did_become_online(struct work_struct *work)
 
 	aoc_state = AOC_STATE_ONLINE;
 
-	for (i = 0; i < s; i++)
-		device_register(&prvdata->services[i]->dev);
+	for (i = 0; i < s; i++) {
+		ret = device_register(&prvdata->services[i]->dev);
+		if (ret)
+			dev_err(dev, "failed to register service device %s err=%d\n",
+				dev_name(&prvdata->services[i]->dev), ret);
+	}
 
 err:
 	mutex_unlock(&aoc_service_lock);
@@ -3303,3 +3304,4 @@ module_init(aoc_init);
 module_exit(aoc_exit);
 
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(DMA_BUF);

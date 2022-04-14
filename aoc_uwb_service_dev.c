@@ -47,8 +47,13 @@ static struct aoc_driver aoc_uwb_sdev = {
 
 static int __init aoc_uwb_service_init(void)
 {
-	aoc_driver_register(&aoc_uwb_sdev);
-	return 0;
+	int ret;
+
+	ret = aoc_driver_register(&aoc_uwb_sdev);
+	if (ret)
+		pr_err("failed to register aoc device %s err=%d\n",
+		       aoc_uwb_sdev.drv.name, ret);
+	return ret;
 }
 
 static void __exit aoc_uwb_service_exit(void)

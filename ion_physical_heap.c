@@ -8,7 +8,6 @@
 #include <linux/genalloc.h>
 #include <linux/io.h>
 #include <linux/mm.h>
-#include <linux/samsung-dma-heap.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
@@ -154,17 +153,8 @@ static struct dma_buf *ion_physical_heap_allocate(struct dma_heap *heap,
 	return dmabuf;
 }
 
-static long ion_physical_get_pool_size(struct dma_heap *heap)
-{
-	struct samsung_dma_heap *samsung_dma_heap = dma_heap_get_drvdata(heap);
-	struct ion_physical_heap *physical_heap = samsung_dma_heap->priv;
-
-	return physical_heap->size / PAGE_SIZE;
-}
-
 static struct dma_heap_ops physical_heap_ops = {
 	.allocate = ion_physical_heap_allocate,
-	.get_pool_size = ion_physical_get_pool_size,
 };
 
 static struct dma_heap *samsung_dma_heap_create_helper(const char *name,
