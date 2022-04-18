@@ -2547,8 +2547,8 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.seg_count = 0;
 
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
-	dev_err(prvdata->dev, "holding %s wakelock for 4 sec\n", ws->name);
-	pm_wakeup_ws_event(ws, 4000, true);
+	dev_err(prvdata->dev, "holding %s wakelock for 10 sec\n", ws->name);
+	pm_wakeup_ws_event(ws, 10000, true);
 
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
