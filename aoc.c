@@ -2873,7 +2873,10 @@ static int aoc_core_suspend(struct device *dev)
 	size_t total_services = aoc_num_services();
 	int i = 0;
 
-	mutex_lock(&aoc_service_lock);
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+		goto exit;
+
 	for (i = 0; i < total_services; i++) {
 		struct aoc_service_dev *s = service_dev_at_index(prvdata, i);
 
@@ -2881,8 +2884,9 @@ static int aoc_core_suspend(struct device *dev)
 			s->suspend_rx_count = aoc_service_slots_available_to_read(s->service,
 										  AOC_UP);
 	}
-	mutex_unlock(&aoc_service_lock);
 
+exit:
+	atomic_dec(&prvdata->aoc_process_active);
 	return 0;
 }
 
@@ -2892,7 +2896,10 @@ static int aoc_core_resume(struct device *dev)
 	size_t total_services = aoc_num_services();
 	int i = 0;
 
-	mutex_lock(&aoc_service_lock);
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+		goto exit;
+
 	for (i = 0; i < total_services; i++) {
 		struct aoc_service_dev *s = service_dev_at_index(prvdata, i);
 
@@ -2904,8 +2911,9 @@ static int aoc_core_resume(struct device *dev)
 					   dev_name(&s->dev), available);
 		}
 	}
-	mutex_unlock(&aoc_service_lock);
 
+exit:
+	atomic_dec(&prvdata->aoc_process_active);
 	return 0;
 }
 
