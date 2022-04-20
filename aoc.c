@@ -2272,6 +2272,9 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 	services = aoc_num_services();
 	for (i = 0; i < services; i++) {
 		service_dev = service_dev_at_index(prvdata, i);
+		if (!service_dev)
+			goto exit;
+
 		service = service_dev->service;
 		if (service_dev->mbox_index != offset)
 			continue;
