@@ -178,6 +178,7 @@ enum aoc_playback_entry_point {
 	SIDETONE = 11,
 	USB_HIFI = 13,
 	SPEAKER_US = 14,
+	IMMERSIVE = 15,
 };
 
 enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, ANDROID_AEC, COMPRESS };
