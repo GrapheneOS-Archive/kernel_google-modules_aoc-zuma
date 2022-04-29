@@ -200,7 +200,11 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 		alsa_stream->pos = (consumed - alsa_stream->hw_ptr_base) % alsa_stream->buffer_size;
 	}
 
-	queue_work(system_highpri_wq, &alsa_stream->pcm_period_work);
+	if (!queue_work(system_highpri_wq, &alsa_stream->pcm_period_work)) {
+		pr_err("period work is busy, try to wakeup sleep thread\n");
+		wake_up(&alsa_stream->substream->runtime->sleep);
+		wake_up(&alsa_stream->substream->runtime->tsleep);
+	}
 
 	return HRTIMER_RESTART;
 }
