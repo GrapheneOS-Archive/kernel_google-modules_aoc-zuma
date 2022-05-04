@@ -2427,9 +2427,15 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (!ramdump_header->valid) {
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+		bool crash_reason_valid = (strnlen(crash_reason,
+			RAMDUMP_SECTION_CRASH_INFO_SIZE) != 0);
+
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
-		strscpy(crash_info, "AoC Watchdog : coredump timeout",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
+			"AoC watchdog : %s (incomplete)",
+			crash_reason_valid ? crash_reason : "unknown reason");
 	}
 
 	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
@@ -2457,10 +2463,12 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (ramdump_header->valid) {
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+
 		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
 		if (section_flags & RAMDUMP_FLAG_VALID)
-			strscpy(crash_info, (const char *)ramdump_header +
-				RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
+			strscpy(crash_info, crash_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE);
 		else
 			strscpy(crash_info, "AoC Watchdog : invalid crash info",
 				RAMDUMP_SECTION_CRASH_INFO_SIZE);
