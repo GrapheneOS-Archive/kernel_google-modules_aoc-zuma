@@ -313,7 +313,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.playback = {
 			.stream_name = "audio_hifiout",
-			.rates = SNDRV_PCM_RATE_8000_96000,
+			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S24_3LE |
@@ -507,7 +507,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 	{
 		.capture = {
 			.stream_name = "audio_hifiin",
-			.rates = SNDRV_PCM_RATE_8000_96000,
+			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE |
 					SNDRV_PCM_FMTBIT_S24_LE |
 					SNDRV_PCM_FMTBIT_S24_3LE |
