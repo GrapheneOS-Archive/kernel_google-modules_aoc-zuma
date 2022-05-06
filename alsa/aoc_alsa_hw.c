@@ -2078,6 +2078,50 @@ int aoc_mic_record_gain_set(struct aoc_chip *chip, long val)
 	return 0;
 }
 
+int aoc_mmap_record_gain_get(struct aoc_chip *chip, long *val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	block = 136;
+	component = 0;
+	key = 16; /* for dB */
+
+	/* Send cmd to AOC */
+	err = aoc_audio_get_parameters(cmd_id, block, component, key, &value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d mmap mic record gain get\n", err);
+		return err;
+	}
+
+	if (val)
+		*val = value;
+
+	return 0;
+}
+
+int aoc_mmap_record_gain_set(struct aoc_chip *chip, long val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
+	block = 136;
+	component = 0;
+	key = 16; /* for dB */
+	value = val;
+
+	/* Send cmd to AOC */
+	err = aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d mmap record gain set\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable)
 {
 	int cmd_id, err = 0;
