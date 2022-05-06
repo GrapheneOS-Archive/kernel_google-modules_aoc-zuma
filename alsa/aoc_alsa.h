@@ -340,6 +340,8 @@ int aoc_mic_dc_blocker_set(struct aoc_chip *chip, int enable);
 
 int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val);
 int aoc_mic_record_gain_set(struct aoc_chip *chip, long val);
+int aoc_mmap_record_gain_get(struct aoc_chip *chip, long *val);
+int aoc_mmap_record_gain_set(struct aoc_chip *chip, long val);
 int aoc_audio_capture_mic_prepare(struct aoc_chip *chip);
 int aoc_audio_capture_mic_close(struct aoc_chip *chip);
 int aoc_audio_capture_active_stream_num(struct aoc_chip *chip);

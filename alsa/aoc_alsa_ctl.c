@@ -17,6 +17,9 @@
 #define AOC_MIC_RECORD_GAIN_IN_DB_MIN -40
 #define AOC_MIC_RECORD_GAIN_IN_DB_MAX 30
 
+#define MMAP_MIC_RECORD_GAIN_IN_DB_MIN -300
+#define MMAP_MIC_RECORD_GAIN_IN_DB_MAX 0
+
 #define COMPRE_OFFLOAD_GAIN_MIN 0
 #define COMPRE_OFFLOAD_GAIN_MAX 8388608 /* 2^23 = 8388608 */
 
@@ -505,6 +508,41 @@ static int mic_record_gain_ctl_get(struct snd_kcontrol *kcontrol,
 	err = aoc_mic_record_gain_get(chip, &ucontrol->value.integer.value[0]);
 	if (err < 0)
 		pr_err("ERR:%d mic record gain get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int mmap_record_gain_ctl_set(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	val = ucontrol->value.integer.value[0];
+	err = aoc_mmap_record_gain_set(chip, val);
+	if (err < 0)
+		pr_err("ERR:%d mmap record gain set to %d fail\n", err, val);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int mmap_record_gain_ctl_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_mmap_record_gain_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d mmap record gain get fail\n", err);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1970,6 +2008,12 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 					  AOC_MIC_RECORD_GAIN_IN_DB_MIN,
 					  AOC_MIC_RECORD_GAIN_IN_DB_MAX, 1, mic_record_gain_ctl_get,
 					  mic_record_gain_ctl_set, NULL),
+
+	SOC_SINGLE_RANGE_EXT_TLV_modified("Mmap Record Gain", SND_SOC_NOPM, 0,
+					  MMAP_MIC_RECORD_GAIN_IN_DB_MIN,
+					  MMAP_MIC_RECORD_GAIN_IN_DB_MAX, 1,
+					  mmap_record_gain_ctl_get,
+					  mmap_record_gain_ctl_set, NULL),
 
 	SOC_SINGLE_EXT("Compress Offload Volume", SND_SOC_NOPM, 0, 100, 0, compr_offload_volume_get,
 		       compr_offload_volume_set),
