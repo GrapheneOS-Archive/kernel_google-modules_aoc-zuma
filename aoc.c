@@ -2552,8 +2552,10 @@ static void aoc_watchdog(struct work_struct *work)
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
+	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
 	u32 section_flags;
+	bool ap_reset = true;
 
 	prvdata->total_restarts++;
 
@@ -2569,16 +2571,14 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_coredump;
 	}
 
-	/* If this was a true watchdog timeout, the AoC may still be running, so
-	 * the coredump will not be written.  Attempt to force a coredump by sending
-	 * a death message to the AoC to trigger a failure.
-	 */
-	trigger_aoc_ramdump(prvdata);
-
 	if (prvdata->ap_triggered_reset) {
 		prvdata->ap_triggered_reset = false;
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
+		ap_reset = true;
+
+		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
 			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
+
+		trigger_aoc_ramdump(prvdata);
 	}
 
 	ramdump_timeout = jiffies + (5 * HZ);
@@ -2634,6 +2634,11 @@ static void aoc_watchdog(struct work_struct *work)
 		else
 			strscpy(crash_info, "AoC Watchdog : invalid crash info",
 				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	}
+
+	if (ap_reset) {
+		/* Prefer the user specified reason */
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1, "%s", ap_reset_reason);
 	}
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
