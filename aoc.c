@@ -652,70 +652,35 @@ static u32 aoc_board_config_parse(struct device_node *node, u32 *board_id, u32 *
 
 	/* Read board config from device tree */
 	err = of_property_read_string(node, "aoc-board-cfg", &board_cfg);
-
 	if (err < 0) {
 		pr_err("Unable to retrieve AoC board configuration, check DT");
 		pr_info("Assuming R4/O6 board configuration");
 		*board_id  = AOC_FWDATA_BOARDID_DFL;
 		*board_rev = AOC_FWDATA_BOARDREV_DFL;
-	} else {
-		if (strncmp(board_cfg, "sl1", 3) == 0) {
-			*board_id  = 0x201;
-			*board_rev = 0x100;
-			pr_info("AoC Platform: SL1");
-		} else if (strncmp(board_cfg, "sl2", 3) == 0) {
-			*board_id  = 0x201;
-			*board_rev = 0x101;
-			pr_info("AoC Platform: SL2");
-		} else if (strncmp(board_cfg, "wf1", 3) == 0) {
-			*board_id  = 0x201;
-			*board_rev = 0x200;
-			pr_info("AoC Platform: WF1");
-		} else if (strncmp(board_cfg, "wf2v2", 5) == 0) {
-			*board_id  = 0x201;
-			*board_rev = 0x202;
-			pr_info("AoC Platform: WF2 (v2)");
-		} else if (strncmp(board_cfg, "wf2", 3) == 0) {
-			*board_id  = 0x201;
-			*board_rev = 0x201;
-			pr_info("AoC Platform: WF2 (v1)");
-		} else if (strncmp(board_cfg, "r4", 2) == 0) {
-			*board_id  = 0x20202;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: R4");
-		} else if (strncmp(board_cfg, "o6", 2) == 0) {
-			*board_id  = 0x20302;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: O6");
-		} else if (strncmp(board_cfg, "p7", 2) == 0) {
-			*board_id  = 0x20401;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: P7");
-		} else if (strncmp(board_cfg, "b3", 2) == 0) {
-			*board_id  = 0x20501;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: B3");
-		} else if (strncmp(board_cfg, "r7", 2) == 0) {
-			*board_id  = 0x20601;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: R7");
-		} else if (strncmp(board_cfg, "c6", 2) == 0) {
-			*board_id  = 0x20801;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: C6");
-		} else if (strncmp(board_cfg, "t6", 2) == 0) {
-			*board_id  = 0x20901;
-			*board_rev = 0x10000;
-			pr_info("AoC Platform: T6");
-		} else {
-			pr_err("Unable to identify AoC board configuration, check DT");
-			pr_info("Assuming R4/O6 board configuration");
-
-			// Assume R4/O6, as this is the most likely to work
-			*board_id  = AOC_FWDATA_BOARDID_DFL;
-			*board_rev = AOC_FWDATA_BOARDREV_DFL;
-		}
+	  return err;
 	}
+
+	/* Read board id from device tree */
+	err = of_property_read_u32(node, "aoc-board-id", board_id);
+	if (err < 0) {
+		pr_err("Unable to retrieve AoC board id, check DT");
+		pr_info("Assuming R4/O6 board configuration");
+		*board_id  = AOC_FWDATA_BOARDID_DFL;
+		*board_rev = AOC_FWDATA_BOARDREV_DFL;
+		return err;
+	}
+
+	/* Read board revision from device tree */
+	err = of_property_read_u32(node, "aoc-board-rev", board_rev);
+	if (err < 0) {
+		pr_err("Unable to retrieve AoC board revision, check DT");
+		pr_info("Assuming R4/O6 board configuration");
+		*board_id  = AOC_FWDATA_BOARDID_DFL;
+		*board_rev = AOC_FWDATA_BOARDREV_DFL;
+		return err;
+	}
+
+	pr_info("AoC Platform: %s", board_cfg);
 
 	return err;
 }
