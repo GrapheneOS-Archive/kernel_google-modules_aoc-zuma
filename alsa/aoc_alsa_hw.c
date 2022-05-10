@@ -58,7 +58,7 @@ static int ep_id_to_source(int ep_idx)
 		return USB_HIFI;
 	case IDX_US:
 		return SPEAKER_US;
-	case IDX_IMS:
+	case IDX_IMSV:
 		return IMMERSIVE;
 	default:
 		return ep_idx;
