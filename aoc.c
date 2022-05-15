@@ -2496,7 +2496,7 @@ static void aoc_watchdog(struct work_struct *work)
 	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
 	u32 section_flags;
-	bool ap_reset = true;
+	bool ap_reset = false;
 
 	prvdata->total_restarts++;
 
@@ -2517,7 +2517,7 @@ static void aoc_watchdog(struct work_struct *work)
 		ap_reset = true;
 
 		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
-			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
+			"AP Reset: %s", prvdata->ap_reset_reason);
 
 		trigger_aoc_ramdump(prvdata);
 	}
