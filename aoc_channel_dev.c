@@ -238,9 +238,16 @@ static int aocc_demux_kthread(void *data)
 		}
 		mutex_unlock(&s_open_files_lock);
 
-		/* Take a wakelock to allow the queue to drain. */
+		/*
+		 * If the message is "waking", take a longer wakelock to allow userspace to
+		 * dequeue the message.  If non-waking, take a short wakelock until the queue
+		 * has been drained to make sure non-waking messages are not preventing us from
+		 * reading a waking message at the end.
+		 */
 		if (take_wake_lock) {
 			pm_wakeup_ws_event(service_prvdata->wakelock, 200, true);
+		} else if (aoc_service_can_read(service)) {
+			pm_wakeup_ws_event(service_prvdata->wakelock, 10, true);
 		}
 
 		if (!handler_found) {
