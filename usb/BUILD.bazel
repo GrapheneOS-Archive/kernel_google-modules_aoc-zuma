@@ -6,27 +6,23 @@
 # unless you have coordinated with the team managing the Soong to Bazel
 # migration.
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kleaf:kernel.bzl", "kernel_module")
 
 kernel_module(
-    name = "alsa.slider",
+    name = "usb.cloudripper",
     srcs = glob([
         "**/*.c",
         "**/*.h",
-        "Kbuild",
     ]) + [
         "//private/google-modules/aoc_ipc:headers",
         "//private/google-modules/aoc:headers",
-        "//private/google-modules/soc/gs:gs101_soc_headers",
     ],
     outs = [
-        "aoc_alsa_dev.ko",
-        "aoc_alsa_dev_util.ko",
+        "aoc_usb_driver.ko",
     ],
-    kernel_build = "//private/google-modules/soc/gs:slider",
+    kernel_build = "//private/google-modules/soc/gs:cloudripper",
     kernel_module_deps = [
-        "//private/google-modules/aoc:aoc.slider",
-        "//private/google-modules/soc/gs:gs101_soc",
+        "//private/google-modules/aoc:aoc.cloudripper",
     ],
     visibility = [
         "//private/google-modules/soc/gs:__pkg__",

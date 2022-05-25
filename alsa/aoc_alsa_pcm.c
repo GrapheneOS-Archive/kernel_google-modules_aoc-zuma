@@ -33,6 +33,7 @@ static void free_aoc_service_work_handler(struct work_struct *work)
 		return;
 
 	aoc_timer_stop_sync(alsa_stream);
+	cancel_work_sync(&alsa_stream->pcm_period_work);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		pr_err("ERR: interrupted while waiting for lock\n");
@@ -45,6 +46,16 @@ static void free_aoc_service_work_handler(struct work_struct *work)
 	alsa_stream->dev = NULL;
 
 	mutex_unlock(&chip->audio_mutex);
+	return;
+}
+
+void aoc_pcm_period_work_handler(struct work_struct *work)
+{
+	struct aoc_alsa_stream *alsa_stream =
+		container_of(work, struct aoc_alsa_stream, pcm_period_work);
+
+	snd_pcm_period_elapsed(alsa_stream->substream);
+
 	return;
 }
 
@@ -115,9 +126,9 @@ static struct snd_pcm_hardware snd_aoc_playback_hw = {
 	.formats = SNDRV_PCM_FMTBIT_S8 | SNDRV_PCM_FMTBIT_U8 | SNDRV_PCM_FMTBIT_S16_LE |
 		   SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S24_3LE | SNDRV_PCM_FMTBIT_S32_LE |
 		   SNDRV_PCM_FMTBIT_FLOAT_LE,
-	.rates = SNDRV_PCM_RATE_CONTINUOUS | SNDRV_PCM_RATE_8000_48000,
+	.rates = SNDRV_PCM_RATE_CONTINUOUS | SNDRV_PCM_RATE_8000_96000,
 	.rate_min = 8000,
-	.rate_max = 48000,
+	.rate_max = 96000,
 	.channels_min = 1,
 	.channels_max = 4,
 	.buffer_bytes_max = 16384 * 6,
@@ -189,7 +200,11 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 		alsa_stream->pos = (consumed - alsa_stream->hw_ptr_base) % alsa_stream->buffer_size;
 	}
 
-	snd_pcm_period_elapsed(alsa_stream->substream);
+	if (!queue_work(system_highpri_wq, &alsa_stream->pcm_period_work)) {
+		pr_err("period work is busy, try to wakeup sleep thread\n");
+		wake_up(&alsa_stream->substream->runtime->sleep);
+		wake_up(&alsa_stream->substream->runtime->tsleep);
+	}
 
 	return HRTIMER_RESTART;
 }
@@ -242,6 +257,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	alsa_stream->stream_type = aoc_pcm_device_to_stream_type(idx);
 
 	INIT_WORK(&alsa_stream->free_aoc_service_work, free_aoc_service_work_handler);
+	INIT_WORK(&alsa_stream->pcm_period_work, aoc_pcm_period_work_handler);
 
 	/* Find the corresponding aoc audio service */
 	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, aoc_pcm_reset_handler,
@@ -276,6 +292,8 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	hrtimer_init(&(alsa_stream->hr_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	alsa_stream->hr_timer.function = &aoc_pcm_hrtimer_irq_handler;
 
+	pr_debug("rtd->pcm->nonatomic = %d\n", rtd->pcm->nonatomic);
+
 	/* TODO: refactor needed on mapping between device number and entrypoint */
 	alsa_stream->entry_point_idx = (idx == 7) ? HAPTICS : idx;
 	mutex_unlock(&chip->audio_mutex);
@@ -291,6 +309,7 @@ out:
 
 	if (alsa_stream) {
 		cancel_work_sync(&alsa_stream->free_aoc_service_work);
+		cancel_work_sync(&alsa_stream->pcm_period_work);
 		kfree(alsa_stream);
 	}
 
@@ -310,6 +329,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 
 	pr_debug("%s: name %s substream %p", __func__, rtd->dai_link->name, substream);
 	aoc_timer_stop_sync(alsa_stream);
+	cancel_work_sync(&alsa_stream->pcm_period_work);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		pr_err("ERR: interrupted while waiting for lock\n");
@@ -591,16 +611,23 @@ static int snd_aoc_pcm_mmap(struct snd_soc_component *component,
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	size_t ring_size;
 	int err;
 	phys_addr_t aoc_ring_base;
+	aoc_direction dir;
 
-	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+	dir = ((alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
+		AOC_DOWN : AOC_UP);
+
+	/* return the heap base address for MMAP playback and capture */
+	if (is_aaudio_mmaped_service(rtd->dai_link->name)) {
 		aoc_ring_base =
-			aoc_service_ring_base_phys_addr(alsa_stream->dev, AOC_DOWN, &ring_size);
-	else
+			aoc_get_heap_base_phys_addr(alsa_stream->dev, dir, &ring_size);
+	} else {
 		aoc_ring_base =
-			aoc_service_ring_base_phys_addr(alsa_stream->dev, AOC_UP, &ring_size);
+			aoc_service_ring_base_phys_addr(alsa_stream->dev, dir, &ring_size);
+	}
 
 	alsa_stream->vma = vma;
 
@@ -611,46 +638,6 @@ static int snd_aoc_pcm_mmap(struct snd_soc_component *component,
 		 &aoc_ring_base, ring_size, vma->vm_start, vma->vm_end - vma->vm_start);
 
 	return err;
-}
-
-static int snd_aoc_pcm_ack(struct snd_pcm_substream *substream)
-{
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
-	struct aoc_service_dev *dev = alsa_stream->dev;
-	unsigned long old_appl_ptr, appl_ptr;
-
-	/* mmap only for ULL. TODO: extend to more entry points */
-	if (alsa_stream->entry_point_idx != ULL)
-		return 0;
-
-	appl_ptr = frames_to_bytes(runtime, runtime->control->appl_ptr);
-
-	/* Update write/read pointer depending on the stream type */
-	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		old_appl_ptr =
-			aoc_ring_bytes_written(dev->service, AOC_DOWN) - alsa_stream->hw_ptr_base;
-
-		pr_debug_ratelimited("ack(): old_ptr=%lu(hw_ptr=%lu), new_ptr=%lu, written:%lu\n",
-				     old_appl_ptr, alsa_stream->hw_ptr_base, appl_ptr,
-				     appl_ptr - old_appl_ptr);
-
-		if (!aoc_service_advance_write_index(dev->service, AOC_DOWN,
-						     appl_ptr - old_appl_ptr))
-			return -EINVAL;
-
-	} else {
-		old_appl_ptr = aoc_ring_bytes_read(dev->service, AOC_UP) - alsa_stream->hw_ptr_base;
-
-		pr_debug_ratelimited("ack(): old_ptr=%lu(hw_ptr=%lu), new_ptr=%lu, written:%lu\n",
-				     old_appl_ptr, alsa_stream->hw_ptr_base, appl_ptr,
-				     appl_ptr - old_appl_ptr);
-
-		if (!aoc_service_advance_read_index(dev->service, AOC_UP, appl_ptr - old_appl_ptr))
-			return -EINVAL;
-	}
-
-	return 0;
 }
 
 static int snd_aoc_pcm_lib_ioctl(struct snd_soc_component *component,
@@ -683,10 +670,8 @@ static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_r
 					      snd_aoc_playback_hw.buffer_bytes_max);
 	}
 
-	/* For pcm mmap, 5.9 removed ack() in snd_soc_component */
-	if (!rtd->ops.ack) {
-		rtd->ops.ack = snd_aoc_pcm_ack;
-	}
+
+	rtd->pcm->nonatomic = true;
 
 	return 0;
 }

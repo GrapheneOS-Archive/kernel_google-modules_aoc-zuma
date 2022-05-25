@@ -174,6 +174,148 @@ static ssize_t memory_exception_show(struct device *dev,
 
 static DEVICE_ATTR_RO(memory_exception);
 
+static ssize_t memory_votes_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+	struct CMD_GET_MEMORY_VOTES_DATA_COUNT get_count_cmd;
+	struct CMD_GET_MEMORY_VOTES_DATA get_data_cmd;
+	u32 total_count;
+	u32 i;
+	u32 bytes_written;
+	int ret;
+
+	AocCmdHdrSet(&get_count_cmd.parent, CMD_GET_MEMORY_VOTES_DATA_COUNT_ID,
+		sizeof(get_count_cmd));
+
+	ret = read_attribute(prvdata, &get_count_cmd, sizeof(get_count_cmd),
+		&get_count_cmd, sizeof(get_count_cmd));
+
+	if (ret < 0)
+		return ret;
+
+	total_count = get_count_cmd.num_of_clients;
+
+	bytes_written = 0;
+
+	for (i = 0; i < total_count; i++) {
+
+		AocCmdHdrSet(&get_data_cmd.parent, CMD_GET_MEMORY_VOTES_DATA_ID, sizeof(get_data_cmd));
+		get_data_cmd.app_id = i;
+		get_data_cmd.valid = false;
+
+		ret = read_attribute(prvdata, &get_data_cmd, sizeof(get_data_cmd),
+			&get_data_cmd, sizeof(get_data_cmd));
+
+		if (ret < 0)
+			return ret;
+
+		if (get_data_cmd.valid) {
+			bytes_written += scnprintf(buf + bytes_written, PAGE_SIZE - bytes_written,
+				"App %hhu, votes Curr/Tot/ON %5u / %5u / %5u Last %10llu us, Dur %10llu us\n",
+				get_data_cmd.app_id,
+				get_data_cmd.votes,
+				get_data_cmd.total_votes,
+				get_data_cmd.on_votes,
+				get_data_cmd.last_on_time_ns / 1000ULL,
+				get_data_cmd.total_time_us);
+		}
+	}
+
+	return bytes_written;
+}
+
+static DEVICE_ATTR_RO(memory_votes);
+
+/* Driver methods */
+
+/*
+ * Convenience method to send a write to the AoC.
+ * Returns negative codes for errors.
+ */
+static ssize_t write_attribute(struct stats_prvdata *prvdata, void *in_cmd,
+			      size_t in_size)
+{
+	struct aoc_service_dev *service = prvdata->service;
+	ssize_t ret;
+
+	ret = mutex_lock_interruptible(&prvdata->lock);
+	if (ret != 0)
+		return ret;
+
+	if (aoc_service_flush_read_data(service))
+		pr_err("Previous response left in channel\n");
+
+	ret = aoc_service_write_timeout(service, in_cmd, in_size, prvdata->service_timeout);
+
+	mutex_unlock(&prvdata->lock);
+	return ret;
+}
+
+static ssize_t udfps_set_clock_source_store(struct device *dev,
+				     struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+	struct CMD_UDFPS_SET_CLOCK_SOURCE clock_src = { 0 };
+	uint8_t type;
+	int ret;
+
+	AocCmdHdrSet(&clock_src.parent, CMD_UDFPS_SET_CLOCK_SOURCE_ID,
+		     sizeof(clock_src));
+	ret = kstrtou8(buf, 10, &type);
+	if (ret < 0)
+		return ret;
+	if (type < SOURCE_TOT)
+		clock_src.clock_source = type;
+        else
+		dev_err(dev, "Invalid input parameter = %d\n", type);
+
+	ret = write_attribute(prvdata, &clock_src, sizeof(clock_src));
+
+	if (ret < 0) {
+		dev_err(dev, "udfps freq start ret = %d\n", ret);
+        }
+
+	return ret;
+}
+
+static DEVICE_ATTR_WO(udfps_set_clock_source);
+
+static ssize_t udfps_get_clock_frequency(uint8_t clk_src, struct device *dev, char *buf)
+{
+	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+	struct CMD_UDFPS_GET_CLOCK_FREQUENCY get_freq_cmd = { 0 };
+	int ret;
+
+	AocCmdHdrSet(&get_freq_cmd.parent, CMD_UDFPS_GET_CLOCK_FREQUENCY_ID,
+		     sizeof(get_freq_cmd));
+
+	get_freq_cmd.clock_source = clk_src;
+	ret = read_attribute(prvdata, &get_freq_cmd, sizeof(get_freq_cmd),
+			     &get_freq_cmd, sizeof(get_freq_cmd));
+
+	if (ret < 0)
+		return ret;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", get_freq_cmd.clock_freq_in_u32);
+}
+
+static ssize_t udfps_get_osc_freq_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	return udfps_get_clock_frequency(0, dev, buf);
+}
+
+static DEVICE_ATTR_RO(udfps_get_osc_freq);
+
+static ssize_t udfps_get_disp_freq_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	return udfps_get_clock_frequency(1, dev, buf);
+}
+
+static DEVICE_ATTR_RO(udfps_get_disp_freq);
+
 static ssize_t read_timed_stat(struct device *dev, char *buf, int index)
 {
 	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
@@ -241,6 +383,9 @@ static ssize_t read_stat_by_name(struct device *dev, char *buf,
 {
 	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
 	int i;
+
+	if (!prvdata)
+		return 0;
 
 	for (i = 0; i < prvdata->total_stats; i++) {
 		if (strcmp(name, prvdata->discovered_stats[i].name))
@@ -355,6 +500,10 @@ static struct attribute *aoc_stats_attrs[] = {
 	&dev_attr_logging_wakeup.attr,
 	&dev_attr_hotword_wakeup.attr,
 	&dev_attr_memory_exception.attr,
+	&dev_attr_memory_votes.attr,
+	&dev_attr_udfps_set_clock_source.attr,
+	&dev_attr_udfps_get_osc_freq.attr,
+	&dev_attr_udfps_get_disp_freq.attr,
 	NULL
 };
 
@@ -478,9 +627,9 @@ static int aoc_control_remove(struct aoc_service_dev *sd)
 
 	pr_debug("remove service with name %s\n", dev_name(dev));
 
-	device_remove_groups(dev, aoc_stats_groups);
-
 	cancel_work_sync(&prvdata->discovery_work);
+
+	device_remove_groups(dev, aoc_stats_groups);
 
 	aoc_remove_map_handler(prvdata->service);
 

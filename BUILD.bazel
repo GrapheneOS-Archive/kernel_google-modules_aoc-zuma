@@ -6,7 +6,7 @@
 # unless you have coordinated with the team managing the Soong to Bazel
 # migration.
 
-load("//build/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
 filegroup(
     name = "headers",
@@ -24,9 +24,10 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
-        "Makefile",
+        "Kbuild",
     ]) + [
         "//private/google-modules/aoc_ipc:sources",
+        "//private/google-modules/soc/gs:gs101_soc_headers",
     ],
     outs = [
         "aoc_channel_dev.ko",
@@ -37,9 +38,12 @@ kernel_module(
         "aoc_uwb_service_dev.ko",
         "mailbox-wc.ko",
     ],
-    kernel_build = "//private/gs-google:slider",
+    kernel_build = "//private/google-modules/soc/gs:slider",
+    kernel_module_deps = [
+        "//private/google-modules/soc/gs:gs101_soc",
+    ],
     visibility = [
         ":__subpackages__",
-        "//private/gs-google:__pkg__",
+        "//private/google-modules/soc/gs:__pkg__",
     ],
 )

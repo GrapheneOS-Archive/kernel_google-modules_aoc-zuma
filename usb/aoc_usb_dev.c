@@ -10,6 +10,8 @@
 #include <linux/init.h>
 #include <linux/jiffies.h>
 #include <linux/module.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/slab.h>
 
 #include "aoc.h"
@@ -150,7 +152,6 @@ static int aoc_usb_setup_done(struct aoc_usb_drvdata *drvdata)
 {
 	int ret;
 	struct CMD_USB_CONTROL_SETUP *cmd;
-	uint64_t aoc_dcbaa;
 
 	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SETUP), GFP_KERNEL);
 	if (!cmd)
@@ -170,8 +171,6 @@ static int aoc_usb_setup_done(struct aoc_usb_drvdata *drvdata)
 		return ret;
 	}
 
-	aoc_dcbaa = cmd->aoc_dcbaa;
-
 	kfree(cmd);
 
 	return 0;
@@ -183,13 +182,16 @@ static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, void *data)
 	struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2 *cmd;
 	struct conn_stat_args *args = data;
 
-	if (args->conn_stat)
-		drvdata->usb_conn_state++;
-	else
-		drvdata->usb_conn_state--;
+	// Don't update usb audio device counter if the notification is for xhci driver state.
+	if (args->bus_id != 0 && args->dev_num != 0 && args->slot_id != 0) {
+		if (args->conn_stat)
+			drvdata->usb_conn_state++;
+		else
+			drvdata->usb_conn_state--;
 
-	dev_dbg(&drvdata->adev->dev, "currently connected usb audio device count = %u\n",
-		drvdata->usb_conn_state);
+		dev_dbg(&drvdata->adev->dev, "currently connected usb audio device count = %u\n",
+			drvdata->usb_conn_state);
+	}
 
 	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2), GFP_KERNEL);
 	if (!cmd)
@@ -288,6 +290,31 @@ static int aoc_usb_set_isoc_tr_info(struct aoc_usb_drvdata *drvdata, void *args)
 	return 0;
 }
 
+static int aoc_usb_set_offload_state(struct aoc_usb_drvdata *drvdata, bool *enabled)
+{
+	int ret = 0;
+	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE *cmd;
+
+	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_OFFLOAD_STATE), GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	AocCmdHdrSet(&cmd->parent,
+		     CMD_USB_CONTROL_SET_OFFLOAD_STATE_ID,
+		     sizeof(*cmd));
+
+	cmd->offloading = *enabled;
+	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
+	if (ret < 0) {
+		kfree(cmd);
+		return ret;
+	}
+
+	kfree(cmd);
+
+	return 0;
+}
+
 static int aoc_usb_notify(struct notifier_block *this,
 			  unsigned long code, void *data)
 {
@@ -321,11 +348,17 @@ static int aoc_usb_notify(struct notifier_block *this,
 	case SYNC_CONN_STAT:
 		ret = aoc_usb_notify_conn_stat(drvdata, data);
 		break;
+	case SET_OFFLOAD_STATE:
+		ret = aoc_usb_set_offload_state(drvdata, data);
+		break;
 	default:
 		dev_warn(&drvdata->adev->dev, "Code %lu is not supported\n", code);
 		ret = -EINVAL;
 		break;
 	}
+
+	if (ret < 0)
+		dev_err(&drvdata->adev->dev, "Fail to handle code %lu, ret = %d", code, ret);
 
 	return ret;
 }
@@ -348,6 +381,51 @@ static void usb_recovery_work(struct work_struct *ws)
 		pr_err("%s: unhandled recover_state: %d\n", __func__, recover_state);
 		break;
 	}
+
+	return;
+}
+
+static int aoc_usb_match(struct device *dev, void *data)
+{
+	if (sysfs_streq(dev_driver_string(dev), "xhci-hcd-exynos"))
+		return 1;
+
+	return 0;
+}
+
+static bool aoc_usb_is_hcd_working()
+{
+	struct device_node *np;
+	struct platform_device *pdev;
+	struct device *udev;
+	int ret;
+
+	np = of_find_node_by_name(NULL, "dwc3");
+	if (!np || !of_device_is_available(np)) {
+		pr_err("Cannot find dwc3 device node\n");
+		return false;
+	}
+
+	pdev = of_find_device_by_node(np);
+	if (!pdev)
+		return false;
+
+	udev = device_find_child(&pdev->dev, NULL, aoc_usb_match);
+	if (!udev)
+		return false;
+
+	ret = usb_host_mode_state_notify(USB_CONNECTED);
+	if (ret)
+		dev_err(udev, "Notifying AoC for xhci driver status is failed.\n");
+
+	return true;
+}
+
+static struct work_struct usb_host_mode_checking_ws;
+static void usb_host_mode_checking_work(struct work_struct *ws)
+{
+	if (aoc_usb_is_hcd_working())
+		pr_info("USB HCD is working, send notification to AoC\n");
 
 	return;
 }
@@ -387,6 +465,8 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 	} else {
 		recover_state = NONE;
 	}
+
+	schedule_work(&usb_host_mode_checking_ws);
 
 	return 0;
 }
@@ -434,7 +514,11 @@ static struct aoc_driver aoc_usb_driver = {
 static int __init aoc_usb_init(void)
 {
 	xhci_vendor_helper_init();
+	usb_vendor_helper_init();
+	snd_usb_audio_vendor_helper_init();
+
 	INIT_WORK(&usb_recovery_ws, usb_recovery_work);
+	INIT_WORK(&usb_host_mode_checking_ws, usb_host_mode_checking_work);
 
 	return aoc_driver_register(&aoc_usb_driver);
 }
