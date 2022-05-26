@@ -162,10 +162,11 @@ static irqreturn_t wc_int_handler(int irq, void *dev)
 
 	for (i = 0; i < MBOX_WC_INTERRUPTS; i++) {
 		if ((status & (1 << i)) != 0) {
+			wc_mbox_int_clear(prvdata->base, i);
+
 			if (chans[i].cl != NULL)
 				mbox_chan_received_data(&chans[i], &data);
 
-			wc_mbox_int_clear(prvdata->base, i);
 		}
 	}
 
