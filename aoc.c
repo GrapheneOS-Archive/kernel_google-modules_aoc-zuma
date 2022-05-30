@@ -187,6 +187,7 @@ struct sscd_info {
 	u16 seg_count;
 };
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata);
 static void sscd_release(struct device *dev);
 
 static struct sscd_info sscd_info;
@@ -1903,6 +1904,16 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 	return dev;
 }
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata)
+{
+	struct mbox_chan *channel = prvdata->mbox_channels[15].channel;
+	static const uint32_t command[] = { 0, 0, 0, 0, 0x0deada0c, 0, 0, 0 };
+
+	dev_notice(prvdata->dev, "Attempting to force AoC coredump\n");
+
+	mbox_send_message(channel, (void *)&command);
+}
+
 static void signal_aoc(struct mbox_chan *channel)
 {
 #ifdef AOC_JUNO
@@ -2382,7 +2393,10 @@ static void aoc_watchdog(struct work_struct *work)
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
+	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
+	u32 section_flags;
+	bool ap_reset = false;
 
 	prvdata->total_restarts++;
 
@@ -2397,9 +2411,12 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (prvdata->ap_triggered_reset) {
 		prvdata->ap_triggered_reset = false;
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
-			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
-		goto coredump_submit;
+		ap_reset = true;
+
+		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
+			"AP Reset: %s", prvdata->ap_reset_reason);
+
+		trigger_aoc_ramdump(prvdata);
 	}
 
 	ramdump_timeout = jiffies + (5 * HZ);
@@ -2410,18 +2427,22 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (!ramdump_header->valid) {
-		dev_err(prvdata->dev, "aoc coredump failed: timed out\n");
-		strscpy(crash_info, "AoC Watchdog : coredump timeout",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+		bool crash_reason_valid = (strnlen(crash_reason,
+			RAMDUMP_SECTION_CRASH_INFO_SIZE) != 0);
+
+		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
+			"AoC watchdog : %s (incomplete)",
+			crash_reason_valid ? crash_reason : "unknown reason");
 	}
 
-	if (memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
+	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
 			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
 	}
 
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
@@ -2441,12 +2462,22 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 
-	if (ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags & RAMDUMP_FLAG_VALID)
-		strscpy(crash_info, (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
-	else
-		strscpy(crash_info, "AoC Watchdog : invalid crash info",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	if (ramdump_header->valid) {
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+
+		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
+		if (section_flags & RAMDUMP_FLAG_VALID)
+			strscpy(crash_info, crash_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		else
+			strscpy(crash_info, "AoC Watchdog : invalid crash info",
+				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	}
+
+	if (ap_reset) {
+		/* Prefer the user specified reason */
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1, "%s", ap_reset_reason);
+	}
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
@@ -2458,7 +2489,6 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.segs[0].vaddr = (void *)carveout_vaddr_from_aoc;
 	sscd_info.seg_count = 1;
 
-coredump_submit:
 	/*
 	 * sscd_report() returns -EAGAIN if there are no readers to consume a
 	 * coredump. Retry sscd_report() with a sleep to handle the race condition
