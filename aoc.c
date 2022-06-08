@@ -2537,8 +2537,9 @@ static void aoc_watchdog(struct work_struct *work)
 
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
 		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
-			"AoC watchdog : %s (incomplete)",
-			crash_reason_valid ? crash_reason : "unknown reason");
+			"AoC watchdog : %s (incomplete %u:%u)",
+			crash_reason_valid ? crash_reason : "unknown reason",
+			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
 	}
 
 	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
