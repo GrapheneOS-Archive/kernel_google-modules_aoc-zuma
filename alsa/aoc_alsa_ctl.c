@@ -686,6 +686,36 @@ static int audio_cca_module_load_ctl_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int audio_gapless_offload_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->gapless_offload_enable;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_gapless_offload_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->gapless_offload_enable = ucontrol->value.integer.value[0];
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int sidetone_enable_ctl_set(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
@@ -2033,7 +2063,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("CCA Module Load", SND_SOC_NOPM, 0, 1, 0,
 		       audio_cca_module_load_ctl_get, audio_cca_module_load_ctl_set),
 
-	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 1000000, 0,
+	SOC_SINGLE_EXT("Gapless Offload Enable", SND_SOC_NOPM, 0, 1, 0,
+		       audio_gapless_offload_ctl_get, audio_gapless_offload_ctl_set),
+
+	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0,
 		voice_pcm_wait_time_get, voice_pcm_wait_time_set),
 
 	{
