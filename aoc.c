@@ -2387,6 +2387,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 	}
 
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
 	 * as 2.  Change this when the header is updated
 	 */
@@ -2394,6 +2395,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
 	if (rc)
 		dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+#endif
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
@@ -3025,6 +3027,7 @@ static void release_gsa_device(void *prv)
 	struct aoc_prvdata *prvdata = prv;
 
 	put_device(prvdata->gsa_dev);
+	prvdata->gsa_dev = NULL;
 }
 
 static int find_gsa_device(struct aoc_prvdata *prvdata)
@@ -3137,8 +3140,10 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	rc = find_gsa_device(prvdata);
 	if (rc) {
 		dev_err(dev, "Failed to initialize gsa device: %d\n", rc);
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 		rc = -EINVAL;
 		goto err_failed_prvdata_alloc;
+#endif
 	}
 
 	ret = init_chardev(prvdata);
