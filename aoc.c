@@ -2140,12 +2140,6 @@ static void aoc_monitor_online(struct work_struct *work)
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
 
-#if IS_ENABLED(CONFIG_SOC_GS201)
-		/* TODO: Causing APC watchdogs on GS201 */
-		mutex_unlock(&aoc_service_lock);
-		return;
-#endif
-
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
 		if (restart_rc)
@@ -2537,8 +2531,9 @@ static void aoc_watchdog(struct work_struct *work)
 
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
 		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
-			"AoC watchdog : %s (incomplete)",
-			crash_reason_valid ? crash_reason : "unknown reason");
+			"AoC watchdog : %s (incomplete %u:%u)",
+			crash_reason_valid ? crash_reason : "unknown reason",
+			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
 	}
 
 	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
