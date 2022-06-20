@@ -9,7 +9,7 @@
 load("//build/kleaf:kernel.bzl", "kernel_module")
 
 kernel_module(
-    name = "usb.cloudripper",
+    name = "usb.gs",
     srcs = glob([
         "**/*.c",
         "**/*.h",
@@ -20,11 +20,13 @@ kernel_module(
     outs = [
         "aoc_usb_driver.ko",
     ],
-    kernel_build = "//private/google-modules/soc/gs:cloudripper",
+    kernel_build = "//private/gs-google:slider",
+    kernel_build = "//private/gs-google:cloudripper",
+    kernel_build = "//private/gs-google:zuma",
     kernel_module_deps = [
-        "//private/google-modules/aoc:aoc.cloudripper",
+        "//private/google-modules/aoc:aoc.gs",
     ],
     visibility = [
-        "//private/google-modules/soc/gs:__pkg__",
+        "//private/gs-google:__pkg__",
     ],
 )

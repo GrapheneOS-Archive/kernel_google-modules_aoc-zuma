@@ -2,7 +2,7 @@
 /*
  * Google Whitechapel AoC Core Driver
  *
- * Copyright (c) 2019 Google LLC
+ * Copyright (c) 2019-2021 Google LLC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -66,6 +66,15 @@
 /* TODO: Remove internal calls, or promote to "public" */
 #include "aoc_ipc_core_internal.h"
 
+/* This should not be required, as we expect only one of the two to be defined */
+#if IS_ENABLED(CONFIG_SOC_GS201)
+    #undef CONFIG_SOC_GS101
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_GS201) && IS_ENABLED(CONFIG_SOC_GS101)
+    #error "GS201 and GS101 are mutually exclusive"
+#endif
+
 #define MAX_FIRMWARE_LENGTH 128
 #define AP_RESET_REASON_LENGTH 32
 #define AOC_S2MPU_CTRL0 0x0
@@ -83,8 +92,22 @@
 
 #define MAX_RESET_REASON_STRING_LEN 128UL
 
-#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
-#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
+#define MAX_SENSOR_POWER_NUM 5
+
+#if IS_ENABLED(CONFIG_SOC_GS201)
+	#define AOC_PCU_BASE  AOC_PCU_BASE_PRO
+	#define AOC_GPIO_BASE AOC_GPIO_BASE_PRO
+	#define AOC_CP_APERTURE_START_OFFSET 0x7FDF80
+	#define AOC_CP_APERTURE_END_OFFSET   0x7FFFFF
+	#define AOC_CLOCK_DIVIDER 1
+#elif IS_ENABLED(CONFIG_SOC_GS101)
+	#define AOC_PCU_BASE  AOC_PCU_BASE_WC
+	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
+	#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
+	#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
+	#define GPIO_INTERRUPT 93
+	#define AOC_CLOCK_DIVIDER 6
+#endif
 
 #define MAX_SENSOR_POWER_NUM 5
 
@@ -161,6 +184,7 @@ struct aoc_prvdata {
 	u32 enable_uart_tx;
 	u32 force_voltage_nominal;
 	u32 no_ap_resets;
+	u32 force_speaker_ultrasonic;
 
 	u32 total_coredumps;
 	u32 total_restarts;
@@ -187,6 +211,7 @@ struct sscd_info {
 	u16 seg_count;
 };
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata);
 static void sscd_release(struct device *dev);
 
 static struct sscd_info sscd_info;
@@ -562,6 +587,7 @@ static int aoc_req_wait(struct aoc_prvdata *p, bool assert)
 
 extern int gs_chipid_get_ap_hw_tune_array(const u8 **array);
 
+#if IS_ENABLED(CONFIG_SOC_GS101)
 static bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata)
 {
 	const u8 *array;
@@ -583,6 +609,9 @@ static bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata)
 	/* Bit 65 says that AoC SRAM was repaired */
 	return ((array[8] & 0x2) != 0);
 }
+#else
+static inline bool aoc_sram_was_repaired(struct aoc_prvdata *prvdata) { return false; }
+#endif
 
 struct aoc_fw_data {
 	u32 key;
@@ -698,12 +727,14 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_vnom = ((dt_force_vnom != 0) || (prvdata->force_voltage_nominal != 0)) ? 1 : 0;
 	u32 disable_mm = prvdata->disable_monitor_mode;
 	u32 enable_uart = prvdata->enable_uart_tx;
+	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
+	bool fw_signed;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -719,13 +750,19 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCCaptureHeapSize, .value = CAPTURE_HEAP_SIZE },
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
-		{ .key = kAOCEnableUART, .value = enable_uart }
+		{ .key = kAOCEnableUART, .value = enable_uart },
+		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic }
 	};
 	const char *version;
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset, bootloader_offset;
 
 	aoc_board_config_parse(prvdata->dev->of_node, &board_id, &board_rev);
+
+	if (!fw) {
+		dev_err(dev, "failed to load firmware image\n");
+		return;
+	}
 
 	for (i = 0; i < fw_data_entries; i++) {
 		if (fw_data[i].key == kAOCBoardID)
@@ -736,8 +773,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	aoc_req_assert(prvdata, true);
 
-	if (!fw || !fw->data) {
-		dev_err(dev, "failed to load firmware image\n");
+	if (!fw->data) {
+		dev_err(dev, "firmware image contains no data\n");
 		goto free_fw;
 	}
 
@@ -770,85 +807,64 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	if (prvdata->no_ap_resets)
 		dev_err(dev, "Resets by AP via sysfs are disabled\n");
 
+	if (prvdata->force_speaker_ultrasonic)
+		dev_err(dev, "Forcefully enabling Speaker Ultrasonic pipeline\n");
+
 	if (!_aoc_fw_is_compatible(fw)) {
 		dev_err(dev, "firmware and drivers are incompatible\n");
 		goto free_fw;
 	}
 
-	if (false == _aoc_fw_is_signed(fw)) {
+	fw_signed = _aoc_fw_is_signed(fw);
 
-		dev_info(dev, "Loading unsigned aoc image\n");
+	dev_info(dev, "Loading %s aoc image\n", fw_signed ? "signed" : "unsigned");
 
-		aoc_control = aoc_dram_translate(prvdata, ipc_offset);
+	aoc_control = aoc_dram_translate(prvdata, ipc_offset);
 
-		aoc_fpga_reset(prvdata);
+	aoc_fpga_reset(prvdata);
 
-		_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
+	_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
 
-		aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
-				fw_data, ARRAY_SIZE(fw_data));
-
-		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
-
-		aoc_state = AOC_STATE_FIRMWARE_LOADED;
-
-		dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
-		disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-		prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
-		aoc_a32_reset();
-		enable_irq(prvdata->watchdog_irq);
-
-		/* Monitor if there is callback from aoc after 5sec */
-		cancel_delayed_work_sync(&prvdata->monitor_work);
-		schedule_delayed_work(&prvdata->monitor_work,
-			msecs_to_jiffies(5 * 1000));
-
-		msleep(2000);
-		dev_info(dev, "re-enabling SICD\n");
-		enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-	} else {
-		int rc;
-
-		dev_info(dev, "Loading signed aoc image\n");
-
-		aoc_control = aoc_dram_translate(prvdata, ipc_offset);
-
-		aoc_fpga_reset(prvdata);
-
-		_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
-
-		rc = aoc_fw_authenticate(prvdata, fw);
+	if (fw_signed) {
+		int rc = aoc_fw_authenticate(prvdata, fw);
 		if (rc) {
 			dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
 			goto free_fw;
 		}
+	} else {
+		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
+	}
 
-		aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
-					fw_data, ARRAY_SIZE(fw_data));
+	aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
+			fw_data, ARRAY_SIZE(fw_data));
 
-		dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
-		disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-		prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
+	aoc_state = AOC_STATE_FIRMWARE_LOADED;
 
-		/* start AOC */
-		rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
+	dev_info(dev, "disabling SICD for 2 sec for aoc boot\n");
+	disable_power_mode(0, POWERMODE_TYPE_SYSTEM);
+	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
+
+	/* start AOC */
+	if (fw_signed) {
+		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
 		if (rc < 0) {
 			dev_err(dev, "GSA: Failed to start AOC: %d\n", rc);
 			goto free_fw;
 		}
+	} else {
+		aoc_a32_reset();
+	}
 
-		enable_irq(prvdata->watchdog_irq);
-		aoc_state = AOC_STATE_FIRMWARE_LOADED;
+	enable_irq(prvdata->watchdog_irq);
 
-		/* Monitor if there is callback from aoc after 5sec */
-		cancel_delayed_work_sync(&prvdata->monitor_work);
-		schedule_delayed_work(&prvdata->monitor_work,
+	/* Monitor if there is callback from aoc after 5sec */
+	cancel_delayed_work_sync(&prvdata->monitor_work);
+	schedule_delayed_work(&prvdata->monitor_work,
 			msecs_to_jiffies(5 * 1000));
 
-		msleep(2000);
-		dev_info(dev, "re-enabling SICD\n");
-		enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
-	}
+	msleep(2000);
+	dev_info(dev, "re-enabling SICD\n");
+	enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
 
 free_fw:
 	release_firmware(fw);
@@ -1320,24 +1336,63 @@ static bool write_reset_trampoline(u32 addr)
 {
 	u32 *reset;
 	u32 instructions[] = {
-		0xe59f0030, /* ldr r0, .PCU_SLC_MIF_REQ_ADDR */
-		0xe3a01003, /* mov r1, #3 */
-		0xe5801000, /* str r1, [r0] */
-		/* mif_ack_loop: */
-		0xe5902004, /* ldr r2, [r0, #4] */
-		0xe3520002, /* cmp r2, #2 */
-		0x1afffffc, /* bne mif_ack_loop */
-		0xe59f0014, /* ldr r0, .PCU_POWER_STATUS_ADDR*/
-		0xe3a01004, /* mov r1, #4 */
-		0xe5801004, /* str r1, [r0, #4] */
-		/* blk_aoc_on_loop: */
-		0xe5902000, /* ldr r2, [r0] */
-		0xe3120004, /* tst r2, #4 */
-		0x0afffffc, /* beq blk_aoc_on_loop */
-		0xe59ff004, /* ldr pc, BOOTLOADER_START_ADDR */
-		0x00b02000, /* PCU_TOP_POWER_STATUS_ADDR */
-		0x00b0819c, /* PCU_SLC_MIF_REQ_ADDR */
-		addr /* BOOTLOADER_START_ADDR */
+        /* <start>: */
+        /*  0: */  0xe59f004c,  /* ldr     r0, [pc, #76]   ; 54 <.PCU_SLC_MIF_REQ_ADDR> */
+        /*  4: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 58 <.PCU_SLC_MIF_REQ_VALUE> */
+        /*  8: */  0xe5801000,  /* str     r1, [r0] */
+        /*  c: */  0xe59f0048,  /* ldr     r0, [pc, #72]   ; 5c <.PCU_SLC_MIF_ACK_ADDR> */
+        /* 10: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 64 <.PCU_SLC_MIF_ACK_VALUE> */
+        /* 14: */  0xe59f2044,  /* ldr     r2, [pc, #68]   ; 60 <.PCU_SLC_MIF_ACK_MASK> */
+
+        /* <mif_ack_loop>: */
+        /* 18: */  0xe5903000,  /* ldr     r3, [r0] */
+        /* 1c: */  0xe0033002,  /* and     r3, r3, r2 */
+        /* 20: */  0xe1530001,  /* cmp     r3, r1 */
+        /* 24: */  0x1afffffb,  /* bne     18 <mif_ack_loop> */
+
+        /* 28: */  0xe59f0038,  /* ldr     r0, [pc, #56]   ; 68 <.PCU_BLK_PWR_REQ_ADDR> */
+        /* 2c: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 6c <.PCU_BLK_PWR_REQ_VALUE> */
+        /* 30: */  0xe5801000,  /* str     r1, [r0] */
+        /* 34: */  0xe59f0034,  /* ldr     r0, [pc, #52]   ; 70 <.PCU_BLK_PWR_ACK_ADDR> */
+        /* 38: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 78 <.PCU_BLK_PWR_ACK_VALUE> */
+        /* 3c: */  0xe59f2030,  /* ldr     r2, [pc, #48]   ; 74 <.PCU_BLK_PWR_ACK_MASK> */
+
+        /* <blk_aoc_on_loop>: */
+        /* 40: */  0xe5903000,  /* ldr     r3, [r0] */
+        /* 44: */  0xe0033002,  /* and     r3, r3, r2 */
+        /* 48: */  0xe1530001,  /* cmp     r3, r1 */
+        /* 4c: */  0x1afffffb,  /* bne     40 <blk_aoc_on_loop> */
+        /* 50: */  0xe59ff024,  /* ldr     pc, [pc, #36]   ; 7c <.BOOTLOADER_START_ADDR> */
+
+
+        #if IS_ENABLED(CONFIG_SOC_GS201)
+          /* .PCU_SLC_MIF_REQ_ADDR:  */  0xA08000,
+          /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
+          /* .PCU_SLC_MIF_ACK_ADDR:  */  0xA08004,
+          /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
+          /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
+
+          /* .PCU_BLK_PWR_REQ_ADDR:  */  0xA0103C,
+          /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
+          /* .PCU_BLK_PWR_ACK_ADDR:  */  0xA0103C,
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x00000C,  /* POWER_MODE field is bits 3:2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* POWER_MODE = On, 0x1 (<< 2) */
+        #elif IS_ENABLED(CONFIG_SOC_GS101)
+          /* .PCU_SLC_MIF_REQ_ADDR:  */  0xB0819C,
+          /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
+          /* .PCU_SLC_MIF_ACK_ADDR:  */  0xB0819C,
+          /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
+          /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
+
+          /* .PCU_BLK_PWR_REQ_ADDR:  */  0xB02004,
+          /* .PCU_BLK_PWR_REQ_VALUE: */  0x000004,  /* BLK_AOC = Initiate Wakeup Sequence, 0x1 (<< 2) */
+          /* .PCU_BLK_PWR_ACK_ADDR:  */  0xB02000,
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x000004,  /* BLK_AOC field is bit 2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* BLK_AOC = Active, 0x1 (<< 2) */
+        #else
+            #error "Unsupported silicon"
+        #endif
+        /* .BOOTLOADER_START_ADDR: */  addr,
 	};
 
 	pr_notice("writing reset trampoline to addr %#x\n", addr);
@@ -1385,6 +1440,7 @@ static bool aoc_a32_reset(void)
 	return true;
 }
 
+__attribute__((unused))
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 {
 	/* 4100 * 0.244 us * 100 = 100 ms */
@@ -1546,7 +1602,7 @@ static uint64_t clock_offset(void)
 
 static inline u64 sys_tick_to_aoc_tick(u64 sys_tick)
 {
-	return (sys_tick - clock_offset()) / 6;
+	return (sys_tick - clock_offset()) / AOC_CLOCK_DIVIDER;
 }
 
 static ssize_t aoc_clock_show(struct device *dev, struct device_attribute *attr,
@@ -1814,8 +1870,8 @@ EXPORT_SYMBOL_GPL(aoc_driver_unregister);
 
 static void aoc_clear_gpio_interrupt(void)
 {
-#ifndef AOC_JUNO
-	int reg = 93, val;
+#if defined(GPIO_INTERRUPT) && !defined(AOC_JUNO)
+	int reg = GPIO_INTERRUPT, val;
 	u32 *gpio_register =
 		aoc_sram_translate(AOC_GPIO_BASE + ((reg / 32) * 12));
 
@@ -1900,6 +1956,16 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 	return dev;
 }
 
+static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata)
+{
+	struct mbox_chan *channel = prvdata->mbox_channels[15].channel;
+	static const uint32_t command[] = { 0, 0, 0, 0, 0x0deada0c, 0, 0, 0 };
+
+	dev_notice(prvdata->dev, "Attempting to force AoC coredump\n");
+
+	mbox_send_message(channel, (void *)&command);
+}
+
 static void signal_aoc(struct mbox_chan *channel)
 {
 #ifdef AOC_JUNO
@@ -1937,9 +2003,9 @@ static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
 #define SSMT_NS_READ_PID(n)	(0x4000 + 4 * (n))
 #define SSMT_NS_WRITE_PID(n)	(0x4200 + 4 * (n))
 
+#if IS_ENABLED(CONFIG_SOC_GS101)
 static void aoc_configure_ssmt(struct platform_device *pdev)
 {
-#ifndef AOC_JUNO
 	struct device *dev = &pdev->dev;
 	int stream_id;
 
@@ -1960,8 +2026,11 @@ static void aoc_configure_ssmt(struct platform_device *pdev)
 	}
 
 	devm_iounmap(dev, ssmt_base);
-#endif
 }
+#else
+static inline void aoc_configure_ssmt( struct platform_device *pdev
+    __attribute__((unused))) { }
+#endif
 
 static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 {
@@ -1979,6 +2048,38 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping carveout failed\n");
 
+#if IS_ENABLED(CONFIG_SOC_GS201)
+	/* Use a 1MB mapping instead of individual mailboxes for now */
+	/* TODO: Turn the mailbox address ranges into dtb entries */
+	if (iommu_map(domain, 0x9E000000, 0x18200000, SZ_2M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping mailboxes failed\n");
+
+	/* Map in GSA mailbox */
+	if (iommu_map(domain, 0x9E200000, 0x17C00000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping gsa mailbox failed\n");
+
+	/* Map in modem registers */
+	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping modem failed\n");
+
+	/* Map in BLK_TPU */
+	/* if (iommu_map(domain, 0x9E600000, 0x1CE00000, SZ_2M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping mailboxes failed\n"); */
+
+	/* Map in the xhci_dma carveout */
+	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping xhci_dma carveout failed\n");
+
+	/* Map in USB for low power audio */
+	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping usb failed\n");
+#else
 	/* Map in the xhci_dma carveout */
 	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
 		      IOMMU_READ | IOMMU_WRITE))
@@ -2005,6 +2106,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping modem failed\n");
 #endif
+#endif
 }
 
 static void aoc_clear_sysmmu(struct aoc_prvdata *p)
@@ -2030,9 +2132,16 @@ static void aoc_monitor_online(struct work_struct *work)
 		container_of(work, struct aoc_prvdata, monitor_work.work);
 	int restart_rc;
 
+
 	mutex_lock(&aoc_service_lock);
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
+
+#if IS_ENABLED(CONFIG_SOC_GS201)
+		/* TODO: Causing APC watchdogs on GS201 */
+		mutex_unlock(&aoc_service_lock);
+		return;
+#endif
 
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
@@ -2372,6 +2481,8 @@ static void aoc_watchdog(struct work_struct *work)
 	struct aoc_ramdump_header *ramdump_header =
 		(struct aoc_ramdump_header *)((unsigned long)prvdata->dram_virt +
 					      RAMDUMP_HEADER_OFFSET);
+	struct wakeup_source *ws =
+		wakeup_source_register(prvdata->dev, dev_name(prvdata->dev));
 	unsigned long ramdump_timeout;
 	unsigned long carveout_paddr_from_aoc;
 	unsigned long carveout_vaddr_from_aoc;
@@ -2383,7 +2494,10 @@ static void aoc_watchdog(struct work_struct *work)
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
+	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
+	u32 section_flags;
+	bool ap_reset = false;
 
 	prvdata->total_restarts++;
 
@@ -2391,6 +2505,9 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.seg_count = 0;
 
 	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
+	dev_err(prvdata->dev, "holding %s wakelock for 10 sec\n", ws->name);
+	pm_wakeup_ws_event(ws, 10000, true);
+
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
 		goto err_coredump;
@@ -2398,9 +2515,12 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (prvdata->ap_triggered_reset) {
 		prvdata->ap_triggered_reset = false;
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
-			"AP Triggered Reset: %s", prvdata->ap_reset_reason);
-		goto coredump_submit;
+		ap_reset = true;
+
+		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
+			"AP Reset: %s", prvdata->ap_reset_reason);
+
+		trigger_aoc_ramdump(prvdata);
 	}
 
 	ramdump_timeout = jiffies + (5 * HZ);
@@ -2411,18 +2531,22 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (!ramdump_header->valid) {
-		dev_err(prvdata->dev, "aoc coredump failed: timed out\n");
-		strscpy(crash_info, "AoC Watchdog : coredump timeout",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+		bool crash_reason_valid = (strnlen(crash_reason,
+			RAMDUMP_SECTION_CRASH_INFO_SIZE) != 0);
+
+		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
+			"AoC watchdog : %s (incomplete)",
+			crash_reason_valid ? crash_reason : "unknown reason");
 	}
 
-	if (memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
+	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
 			RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		goto coredump_submit;
 	}
 
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
@@ -2442,12 +2566,22 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 
-	if (ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags & RAMDUMP_FLAG_VALID)
-		strscpy(crash_info, (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET, RAMDUMP_SECTION_CRASH_INFO_SIZE);
-	else
-		strscpy(crash_info, "AoC Watchdog : invalid crash info",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	if (ramdump_header->valid) {
+		const char *crash_reason = (const char *)ramdump_header +
+			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+
+		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
+		if (section_flags & RAMDUMP_FLAG_VALID)
+			strscpy(crash_info, crash_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE);
+		else
+			strscpy(crash_info, "AoC Watchdog : invalid crash info",
+				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+	}
+
+	if (ap_reset) {
+		/* Prefer the user specified reason */
+		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1, "%s", ap_reset_reason);
+	}
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
@@ -2459,7 +2593,6 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.segs[0].vaddr = (void *)carveout_vaddr_from_aoc;
 	sscd_info.seg_count = 1;
 
-coredump_submit:
 	/*
 	 * sscd_report() returns -EAGAIN if there are no readers to consume a
 	 * coredump. Retry sscd_report() with a sleep to handle the race condition
@@ -2499,6 +2632,7 @@ err_coredump:
 		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
 	else
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+
 	mutex_unlock(&aoc_service_lock);
 }
 
@@ -2671,6 +2805,23 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		prvdata->enable_uart_tx = enable_uart;
 		if (prvdata->enable_uart_tx != 0)
 			pr_info("AoC UART Logging Enabled\n");
+
+		ret = 0;
+	}
+	break;
+
+	case AOC_IOCTL_FORCE_SPEAKER_ULTRASONIC:
+	{
+		u32 force_sprk_ultrasonic;
+
+		BUILD_BUG_ON(sizeof(force_sprk_ultrasonic) != _IOC_SIZE(AOC_IOCTL_FORCE_SPEAKER_ULTRASONIC));
+
+		if (copy_from_user(&force_sprk_ultrasonic, (u32 *)arg, _IOC_SIZE(cmd)))
+			break;
+
+		prvdata->force_speaker_ultrasonic = force_sprk_ultrasonic;
+		if (prvdata->force_speaker_ultrasonic != 0)
+			pr_info("AoC Forcefully enabling Speaker Ultrasonic pipeline\n");
 
 		ret = 0;
 	}
@@ -3156,7 +3307,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		dev_err(dev, "failed to register acpm aoc reset callback\n");
 		rc = -EIO;
-		goto err_acmp_reset;
+		/* goto err_acmp_reset; */
 	}
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
@@ -3176,7 +3327,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_acmp_reset:
+/* err_acmp_reset: */
 #ifdef AOC_JUNO
 err_aoc_irq_req:
 #endif

@@ -2136,6 +2136,17 @@ int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable)
 	return 0;
 }
 
+int aoc_load_cca_module(struct aoc_chip *chip, long load)
+{
+	int cmd_id, err = 0;
+
+	cmd_id = (load == 1) ? CMD_AUDIO_OUTPUT_VOICE_CCA_START_ID :
+				       CMD_AUDIO_OUTPUT_VOICE_CCA_STOP_ID;
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+
+	return err;
+}
+
 int aoc_lvm_enable_get(struct aoc_chip *chip, long *enable)
 {
 	int err;
