@@ -9,7 +9,9 @@
  * published by the Free Software Foundation.
  */
 
-#if IS_ENABLED(CONFIG_SOC_GS201)
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+  #include "aoc-interface-zuma.h"
+#elif IS_ENABLED(CONFIG_SOC_GS201)
   #include "aoc-interface-gs201.h"
 #elif IS_ENABLED(CONFIG_SOC_GS101)
   #include "aoc-interface-gs101.h"

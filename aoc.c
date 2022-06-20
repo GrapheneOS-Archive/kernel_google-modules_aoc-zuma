@@ -66,9 +66,21 @@
 /* TODO: Remove internal calls, or promote to "public" */
 #include "aoc_ipc_core_internal.h"
 
-/* This should not be required, as we expect only one of the two to be defined */
-#if IS_ENABLED(CONFIG_SOC_GS201)
+/* This should not be required, as we expect only one config to be defined */
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
     #undef CONFIG_SOC_GS101
+    #undef CONFIG_SOC_GS201
+#elif IS_ENABLED(CONFIG_SOC_GS201)
+    #undef CONFIG_SOC_GS101
+    #undef CONFIG_SOC_ZUMA
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA) && IS_ENABLED(CONFIG_SOC_GS101)
+    #error "ZUMA and GS101 are mutually exclusive"
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA) && IS_ENABLED(CONFIG_SOC_GS201)
+    #error "ZUMA and GS201 are mutually exclusive"
 #endif
 
 #if IS_ENABLED(CONFIG_SOC_GS201) && IS_ENABLED(CONFIG_SOC_GS101)
@@ -97,16 +109,28 @@
 #if IS_ENABLED(CONFIG_SOC_GS201)
 	#define AOC_PCU_BASE  AOC_PCU_BASE_PRO
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_PRO
+	#define AOC_PCU_DB_SET_OFFSET AOC_PCU_DB_SET_OFFSET_PRO
+	#define AOC_PCU_DB_CLR_OFFSET AOC_PCU_DB_CLR_OFFSET_PRO
 	#define AOC_CP_APERTURE_START_OFFSET 0x7FDF80
 	#define AOC_CP_APERTURE_END_OFFSET   0x7FFFFF
 	#define AOC_CLOCK_DIVIDER 1
 #elif IS_ENABLED(CONFIG_SOC_GS101)
 	#define AOC_PCU_BASE  AOC_PCU_BASE_WC
 	#define AOC_GPIO_BASE AOC_GPIO_BASE_WC
+	#define AOC_PCU_DB_SET_OFFSET AOC_PCU_DB_SET_OFFSET_WC
+	#define AOC_PCU_DB_CLR_OFFSET AOC_PCU_DB_CLR_OFFSET_WC
 	#define AOC_CP_APERTURE_START_OFFSET 0x5FDF80
 	#define AOC_CP_APERTURE_END_OFFSET   0x5FFFFF
 	#define GPIO_INTERRUPT 93
 	#define AOC_CLOCK_DIVIDER 6
+#elif IS_ENABLED(CONFIG_SOC_ZUMA)
+	#define AOC_PCU_BASE  AOC_PCU_BASE_ZUMA
+	#define AOC_GPIO_BASE AOC_GPIO_BASE_ZUMA
+	#define AOC_PCU_DB_SET_OFFSET AOC_PCU_DB_SET_OFFSET_ZUMA
+	#define AOC_PCU_DB_CLR_OFFSET AOC_PCU_DB_CLR_OFFSET_ZUMA
+	#define AOC_CP_APERTURE_START_OFFSET 0x7FDF80
+	#define AOC_CP_APERTURE_END_OFFSET   0x7FFFFF
+	#define AOC_CLOCK_DIVIDER 1
 #endif
 
 #define MAX_SENSOR_POWER_NUM 5
@@ -1375,8 +1399,8 @@ static bool write_reset_trampoline(u32 addr)
           /* .PCU_BLK_PWR_REQ_ADDR:  */  0xA0103C,
           /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
           /* .PCU_BLK_PWR_ACK_ADDR:  */  0xA0103C,
-          /* .PCU_BLK_PWR_ACK_MASK:  */  0x00000C,  /* POWER_MODE field is bits 3:2 */
-          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* POWER_MODE = On, 0x1 (<< 2) */
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x00001C,  /* POWER_MODE field is bits 3:2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000014,  /* POWER_MODE = On, 0x1 (<< 2) */
         #elif IS_ENABLED(CONFIG_SOC_GS101)
           /* .PCU_SLC_MIF_REQ_ADDR:  */  0xB0819C,
           /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
@@ -1389,6 +1413,18 @@ static bool write_reset_trampoline(u32 addr)
           /* .PCU_BLK_PWR_ACK_ADDR:  */  0xB02000,
           /* .PCU_BLK_PWR_ACK_MASK:  */  0x000004,  /* BLK_AOC field is bit 2 */
           /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* BLK_AOC = Active, 0x1 (<< 2) */
+        #elif IS_ENABLED(CONFIG_SOC_ZUMA)
+          /* .PCU_SLC_MIF_REQ_ADDR:  */ 0x1409000,
+          /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
+          /* .PCU_SLC_MIF_ACK_ADDR:  */ 0x1409004,
+          /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
+          /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
+
+          /* .PCU_BLK_PWR_REQ_ADDR:  */ 0x140200C,
+          /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
+          /* .PCU_BLK_PWR_ACK_ADDR:  */ 0x140200C,
+          /* .PCU_BLK_PWR_ACK_MASK:  */  0x00001C,  /* POWER_MODE field is bits 3:2 */
+          /* .PCU_BLK_PWR_ACK_VALUE: */  0x000014,  /* POWER_MODE = On, 0x1 (<< 2) */
         #else
             #error "Unsupported silicon"
         #endif
@@ -2079,7 +2115,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping usb failed\n");
-#else
+#elif IS_ENABLED(CONFIG_SOC_GS101)
 	/* Map in the xhci_dma carveout */
 	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
 		      IOMMU_READ | IOMMU_WRITE))
@@ -2105,6 +2141,34 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping modem failed\n");
+#elif IS_ENABLED(CONFIG_SOC_ZUMA)
+	/* Use a 1MB mapping instead of individual mailboxes for now */
+	/* TODO: Turn the mailbox address ranges into dtb entries */
+	if (iommu_map(domain, 0x9E000000, 0x15100000, SZ_2M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping mailboxes failed\n");
+
+	/* Map in GSA mailbox */
+	if (iommu_map(domain, 0x9E200000, 0x16400000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping gsa mailbox failed\n");
+
+	/* Map in modem registers */
+	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping modem failed\n");
+
+	/* Map in USB for low power audio */
+	if (iommu_map(domain, 0x9E500000, 0x11100000, SZ_1M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping usb failed\n");
+
+	/* Map in the xhci_dma carveout */
+	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
+		      IOMMU_READ | IOMMU_WRITE))
+		dev_err(dev, "mapping xhci_dma carveout failed\n");
+#else
+    #error "Unsupported silicon!"
 #endif
 #endif
 }
