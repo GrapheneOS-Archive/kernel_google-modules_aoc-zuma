@@ -2544,11 +2544,11 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
-	dram_pages = kmalloc_array(num_pages, sizeof(*dram_pages), GFP_KERNEL);
+	dram_pages = vmalloc(num_pages * sizeof(*dram_pages));
 	if (!dram_pages) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: alloc dram_pages failed\n");
-		goto err_kmalloc;
+		goto err_vmalloc;
 	}
 	for (i = 0; i < num_pages; i++)
 		dram_pages[i] = phys_to_page(prvdata->dram_resource.start +
@@ -2613,8 +2613,8 @@ static void aoc_watchdog(struct work_struct *work)
 	if (dram_cached)
 		vunmap(dram_cached);
 err_vmap:
-	kfree(dram_pages);
-err_kmalloc:
+	vfree(dram_pages);
+err_vmalloc:
 err_coredump:
 	/* make sure there is no AoC startup work active */
 	cancel_work_sync(&prvdata->online_work);
