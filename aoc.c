@@ -727,8 +727,12 @@ static int aoc_fw_authenticate(struct aoc_prvdata *prvdata,
 
 	memcpy(header_vaddr, fw->data, AOC_AUTH_HEADER_SIZE);
 
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	rc = gsa_load_aoc_fw_image(prvdata->gsa_dev, header_dma_addr,
 				   prvdata->dram_resource.start + AOC_BINARY_DRAM_OFFSET);
+#else
+    rc = -1;
+#endif
 	if (rc) {
 		dev_err(prvdata->dev, "GSA authentication failed: %d\n", rc);
 		goto err_auth;
@@ -869,13 +873,16 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
 
 	/* start AOC */
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	if (fw_signed) {
 		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
 		if (rc < 0) {
 			dev_err(dev, "GSA: Failed to start AOC: %d\n", rc);
 			goto free_fw;
 		}
-	} else {
+	} else
+#endif
+    {
 		aoc_a32_reset();
 	}
 
