@@ -119,7 +119,7 @@ void aoc_compr_offload_isr(struct aoc_service_dev *dev)
 		if (alsa_stream->gapless_offload_enable) {
 			pr_info("compress offload gapless ring buffer is depleted\n");
 			snd_compr_drain_notify(alsa_stream->cstream);
-			aoc_compr_reset_pointer(alsa_stream);
+			alsa_stream->eof_reach = 1;
 			return;
 		}
 	}
@@ -127,7 +127,7 @@ void aoc_compr_offload_isr(struct aoc_service_dev *dev)
 	if (aoc_ring_bytes_available_to_read(dev->service, AOC_DOWN) == 0) {
 		pr_info("compress offload ring buffer is depleted\n");
 		snd_compr_drain_notify(alsa_stream->cstream);
-		aoc_compr_reset_pointer(alsa_stream);
+		alsa_stream->eof_reach = 1;
 		return;
 	}
 
@@ -360,6 +360,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	alsa_stream->compr_padding = COMPR_INVALID_METADATA;
 	alsa_stream->compr_delay = COMPR_INVALID_METADATA;
 	alsa_stream->send_metadata = 1;
+	alsa_stream->eof_reach = 0;
 	alsa_stream->gapless_offload_enable = chip->gapless_offload_enable;
 
 	err = aoc_audio_open(alsa_stream);
@@ -687,6 +688,16 @@ static int aoc_compr_set_metadata(struct snd_soc_component *component,
 	int ret = 0;
 
 	pr_debug("%s %pK, %pK\n", __func__, runtime, metadata);
+	/* clear pointer for gapless offload playback, call sequence should be:
+	 * receive EOF -> notify EOF to ap -> ap set_metadata for next track
+	 * -> ap write buffer for next track -> write metadata to aoc ->
+	 * write next track buffer to aoc.
+	 * Reset buffer pointer when ap set_metadata for next track.
+	 */
+	if (alsa_stream->eof_reach) {
+		alsa_stream->eof_reach = 0;
+		aoc_compr_reset_pointer(alsa_stream);
+	}
 
 	if (metadata->key == SNDRV_COMPRESS_ENCODER_PADDING) {
 		alsa_stream->compr_padding = metadata->value[0];
