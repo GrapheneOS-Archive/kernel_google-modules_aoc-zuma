@@ -267,6 +267,7 @@ struct aoc_alsa_stream {
 	int compr_offload_codec;
 	int gapless_offload_enable;
 	int send_metadata;
+	int eof_reach;
 	uint32_t compr_padding;
 	uint32_t compr_delay;
 	uint64_t compr_pcm_io_sample_base;
