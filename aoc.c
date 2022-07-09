@@ -291,7 +291,7 @@ static unsigned long write_blocked_mask;
 
 static bool aoc_fpga_reset(struct aoc_prvdata *prvdata);
 static bool write_reset_trampoline(u32 addr);
-static bool aoc_a32_reset(void);
+static bool aoc_a32_release_from_reset(void);
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata);
 static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size);
 
@@ -883,7 +883,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	} else
 #endif
 	{
-		aoc_a32_reset();
+		aoc_a32_release_from_reset();
 	}
 
 	enable_irq(prvdata->watchdog_irq);
@@ -1467,7 +1467,7 @@ static bool aoc_fpga_reset(struct aoc_prvdata *prvdata)
 	return true;
 }
 
-static bool aoc_a32_reset(void)
+static bool aoc_a32_release_from_reset(void)
 {
 	u32 pcu_value;
 	void __iomem *pcu = aoc_sram_translate(AOC_PCU_BASE);
