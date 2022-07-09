@@ -897,12 +897,18 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	/* Monitor if there is callback from aoc after 5sec */
 	cancel_delayed_work_sync(&prvdata->monitor_work);
+
+// TODO(b/238552747): [Zuma] Temporarily disable online monitor
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	dev_err(dev, "SICD/Suspend are disabled due to AoC FW load. b/238552747\n");
+#else
 	schedule_delayed_work(&prvdata->monitor_work,
 			msecs_to_jiffies(5 * 1000));
 
 	msleep(2000);
 	dev_info(dev, "re-enabling SICD\n");
 	enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
+#endif
 
 free_fw:
 	release_firmware(fw);
