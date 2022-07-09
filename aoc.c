@@ -852,7 +852,12 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	aoc_fpga_reset(prvdata);
 
-	_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
+	{
+		bool commit_rc = _aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
+		if (!commit_rc) {
+			dev_err(dev, "FW commit failed!\n");
+		}
+	}
 
 	if (fw_signed) {
 		int rc = aoc_fw_authenticate(prvdata, fw);
