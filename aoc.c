@@ -289,7 +289,6 @@ struct aoc_client {
 static unsigned long read_blocked_mask;
 static unsigned long write_blocked_mask;
 
-static bool aoc_fpga_reset(struct aoc_prvdata *prvdata);
 static bool write_reset_trampoline(u32 addr);
 static bool aoc_a32_release_from_reset(void);
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata);
@@ -849,8 +848,6 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	dev_info(dev, "Loading %s aoc image\n", fw_signed ? "signed" : "unsigned");
 
 	aoc_control = aoc_dram_translate(prvdata, ipc_offset);
-
-	aoc_fpga_reset(prvdata);
 
 	{
 		bool commit_rc = _aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
@@ -1462,24 +1459,6 @@ static bool write_reset_trampoline(u32 addr)
 	return true;
 }
 
-static bool aoc_fpga_reset(struct aoc_prvdata *prvdata)
-{
-#ifdef AOC_JUNO
-	u32 *reset = aoc_sram_translate(0x1000000);
-
-	if (!reset)
-		return false;
-
-	aoc_take_offline(prvdata);
-
-	/* Assert and deassert reset */
-	iowrite32(0, reset);
-	iowrite32(1, reset);
-#endif
-
-	return true;
-}
-
 static bool aoc_a32_release_from_reset(void)
 {
 	u32 pcu_value;
@@ -1926,7 +1905,7 @@ EXPORT_SYMBOL_GPL(aoc_driver_unregister);
 
 static void aoc_clear_gpio_interrupt(void)
 {
-#if defined(GPIO_INTERRUPT) && !defined(AOC_JUNO)
+#if defined(GPIO_INTERRUPT)
 	int reg = GPIO_INTERRUPT, val;
 	u32 *gpio_register =
 		aoc_sram_translate(AOC_GPIO_BASE + ((reg / 32) * 12));
@@ -2024,21 +2003,7 @@ static void trigger_aoc_ramdump(struct aoc_prvdata *prvdata)
 
 static void signal_aoc(struct mbox_chan *channel)
 {
-#ifdef AOC_JUNO
-	(void)channel;
-
-	u32 mask = (1 << AOC_DOWNCALL_DOORBELL);
-
-	/* The signal is called as directly after writing a message to shared
-	 * memory, so make sure all pending writes are flushed before actually
-	 * sending the signal
-	 */
-	wmb();
-	iowrite32(mask,
-		  aoc_sram_translate(AOC_PCU_BASE + AOC_PCU_DB_SET_OFFSET));
-#else
 	mbox_send_message(channel, NULL);
-#endif
 }
 
 static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
@@ -2090,7 +2055,6 @@ static inline void aoc_configure_ssmt( struct platform_device *pdev
 
 static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 {
-#ifndef AOC_JUNO
 	struct iommu_domain *domain = p->domain;
 	struct device *dev = p->dev;
 	int rc;
@@ -2190,12 +2154,10 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 #else
 	#error "Unsupported silicon!"
 #endif
-#endif
 }
 
 static void aoc_clear_sysmmu(struct aoc_prvdata *p)
 {
-#ifndef AOC_JUNO
 	struct iommu_domain *domain = p->domain;
 
 	/* Memory carveout */
@@ -2207,7 +2169,6 @@ static void aoc_clear_sysmmu(struct aoc_prvdata *p)
 	iommu_unmap(domain, 0x9E100000, SZ_1M);
 	iommu_unmap(domain, 0x9E200000, SZ_1M);
 	iommu_unmap(domain, 0x9E300000, SZ_1M);
-#endif
 }
 
 static void aoc_monitor_online(struct work_struct *work)
@@ -2530,24 +2491,6 @@ static void aoc_pheap_free_cb(struct samsung_dma_buffer *buffer, void *ctx)
 	mutex_unlock(&aoc_service_lock);
 }
 
-#ifdef AOC_JUNO
-static irqreturn_t aoc_int_handler(int irq, void *dev)
-{
-	aoc_clear_gpio_interrupt();
-
-	/* Transitioning from offline to online */
-	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
-		if (aoc_fw_ready())
-			aoc_state = AOC_STATE_STARTING;
-			schedule_work(&aoc_online_work);
-		}
-	} else if (aoc_state == AOC_STATE_ONLINE) {
-		aoc_process_services(dev_get_drvdata(dev), 0);
-	}
-
-	return IRQ_HANDLED;
-}
-#else
 static irqreturn_t watchdog_int_handler(int irq, void *dev)
 {
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
@@ -2740,7 +2683,6 @@ void aoc_trigger_watchdog(const char *reason)
 	reset_store(prvdata->dev, NULL, reason, strlen(reason));
 }
 EXPORT_SYMBOL_GPL(aoc_trigger_watchdog);
-#endif
 
 static struct dma_heap *aoc_create_dma_buf_heap(struct aoc_prvdata *prvdata, const char *name,
 						phys_addr_t base, size_t size)
@@ -3034,11 +2976,6 @@ static void aoc_cleanup_resources(struct platform_device *pdev)
 			aoc_clear_sysmmu(prvdata);
 			prvdata->domain = NULL;
 		}
-
-#ifdef AOC_JUNO
-		free_irq(aoc_irq, prvdata->dev);
-		aoc_irq = -1;
-#endif
 	}
 
 }
@@ -3196,14 +3133,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		goto err_mem_resources;
 	}
 
-#ifdef AOC_JUNO
-	aoc_irq = platform_get_irq(pdev, 0);
-	if (aoc_irq < 1) {
-		dev_err(dev, "failed to configure aoc interrupt\n");
-		rc = aoc_irq;
-		goto err_get_irq;
-	}
-#else
 	for (i = 0; i < ARRAY_SIZE(prvdata->mbox_channels); i++) {
 		prvdata->mbox_channels[i].client.dev = dev;
 		prvdata->mbox_channels[i].client.tx_block = false;
@@ -3271,7 +3200,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	}
 	prvdata->sysmmu_secure_irq = ret;
 	of_node_put(sysmmu_node);
-#endif
 
 	pr_notice("found aoc with interrupt:%d sram:%pR dram:%pR\n", aoc_irq,
 		  aoc_sram_resource, &prvdata->dram_resource);
@@ -3314,7 +3242,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		goto err_sram_dram_map;
 	}
 
-#ifndef AOC_JUNO
 	prvdata->aoc_s2mpu_virt = devm_platform_ioremap_resource_byname(pdev, "aoc_s2mpu");
 	if (IS_ERR(prvdata->aoc_s2mpu_virt)) {
 		dev_err(dev, "failed to map aoc_s2mpu: rc = %ld\n",
@@ -3350,7 +3277,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		aoc_cleanup_resources(pdev);
 		return -ENOMEM;
 	}
-#endif
 
 	prvdata->sensor_power_count = of_property_count_strings(dev->of_node, "sensor_power_list");
 	if (prvdata->sensor_power_count > MAX_SENSOR_POWER_NUM) {
@@ -3386,17 +3312,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	aoc_configure_interrupt();
 
-#ifdef AOC_JUNO
-	ret = request_irq(aoc_irq, aoc_int_handler, IRQF_TRIGGER_HIGH, "aoc",
-			  prvdata->_device);
-	if (ret != 0) {
-		pr_err("failed to register interrupt handler : %d\n", ret);
-
-		rc = -ENXIO;
-		goto err_aoc_irq_req;
-	}
-#endif
-
 	ret = acpm_ipc_request_channel(aoc_node, acpm_aoc_reset_callback,
 				       &prvdata->acpm_async_id, &acpm_async_size);
 	if (ret < 0) {
@@ -3423,22 +3338,13 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	return 0;
 
 /* err_acmp_reset: */
-#ifdef AOC_JUNO
-err_aoc_irq_req:
-#endif
-#ifndef AOC_JUNO
 err_find_iommu:
 err_s2mpu_map:
-#endif
 err_sram_dram_map:
 
-#ifndef AOC_JUNO
 err_watchdog_sysmmu_irq:
 err_watchdog_irq_req:
 err_watchdog_irq_get:
-#else
-err_get_irq:
-#endif
 err_mem_resources:
 	aoc_cleanup_resources(pdev);
 err_memnode:
