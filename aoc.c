@@ -727,6 +727,7 @@ static int aoc_fw_authenticate(struct aoc_prvdata *prvdata,
 
 	memcpy(header_vaddr, fw->data, AOC_AUTH_HEADER_SIZE);
 
+// TODO(b/238553915): [Zuma] Enable GSA boot
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	rc = gsa_load_aoc_fw_image(prvdata->gsa_dev, header_dma_addr,
 				   prvdata->dram_resource.start + AOC_BINARY_DRAM_OFFSET);
@@ -873,6 +874,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
 
 	/* start AOC */
+// TODO(b/238553915): [Zuma] Enable GSA boot
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	if (fw_signed) {
 		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
@@ -2394,6 +2396,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 	}
 
+// TODO(b/238553915): [Zuma] Enable GSA boot
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
 	 * as 2.  Change this when the header is updated
@@ -3147,6 +3150,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	rc = find_gsa_device(prvdata);
 	if (rc) {
 		dev_err(dev, "Failed to initialize gsa device: %d\n", rc);
+// TODO(b/238553915): [Zuma] Enable GSA boot
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
 		rc = -EINVAL;
 		goto err_failed_prvdata_alloc;
