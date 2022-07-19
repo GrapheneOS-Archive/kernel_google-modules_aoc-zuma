@@ -37,6 +37,21 @@ int unregister_aoc_usb_notifier(struct notifier_block *nb)
 	return blocking_notifier_chain_unregister(&aoc_usb_notifier_list, nb);
 }
 
+int xhci_send_feedback_ep_info(struct xhci_hcd *xhci, struct feedback_ep_info_args *cmd_args)
+{
+	if (!xhci || !cmd_args)
+		return -EINVAL;
+
+	xhci_dbg(xhci, "Send feedback EP info, Num = %u, Max packet size = %u, bInterval = %u, bRefresh = %u",
+		 cmd_args->ep_num, cmd_args->max_packet,
+		 cmd_args->binterval, cmd_args->brefresh);
+
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SEND_FB_EP_INFO,
+				     cmd_args);
+
+	return 0;
+}
+
 /*
  * If the Host connected to a hub, user may connect more than two USB audio
  * headsets or DACs. A caller can call this function to know how many USB
