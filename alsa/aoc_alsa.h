@@ -65,6 +65,7 @@ enum uc_device_id {
 #define DEFAULT_PCM_WAIT_TIME_IN_MSECS 10000
 #define DEFAULT_VOICE_PCM_WAIT_TIME_IN_MSECS 500
 #define COMPR_OFFLOAD_GAIN_RESET_TIME_DELAY_IN_MSECS 150
+#define COMPR_INVALID_METADATA (-1)
 
 /* Default mic and sink for audio capturing/playback */
 #define DEFAULT_MICPHONE_ID 0
@@ -123,6 +124,7 @@ enum bluetooth_mode {
 	AHS_BT_MODE_A2DP_ENC_LC3,
 	AHS_BT_MODE_BLE_ENC_LC3,
 	AHS_BT_MODE_BLE_CONVERSATION,
+	AHS_BT_MODE_A2DP_ENC_OPUS,
 };
 
 enum TelephonyModes {
@@ -181,7 +183,7 @@ enum aoc_playback_entry_point {
 	IMMERSIVE = 15,
 };
 
-enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, ANDROID_AEC, COMPRESS };
+enum { NORMAL = 0, MMAPED, RAW, INCALL, HIFI, ANDROID_AEC, COMPRESS, CAP_INJ };
 
 enum { BUILTIN_MIC0 = 0, BUILTIN_MIC1, BUILTIN_MIC2, BUILTIN_MIC3 };
 enum { MIC_LOW_POWER_GAIN = 0, MIC_HIGH_POWER_GAIN, MIC_CURRENT_GAIN };
@@ -243,6 +245,7 @@ struct aoc_chip {
 	int cca_module_loaded;
 	int sidetone_enable;
 	int mic_loopback_enabled;
+	int gapless_offload_enable;
 	unsigned int opened;
 	unsigned int capture_param_set;
 	struct mutex audio_mutex;
@@ -262,6 +265,11 @@ struct aoc_alsa_stream {
 	struct snd_pcm_substream *substream;
 	struct snd_compr_stream *cstream; /* compress offload stream */
 	int compr_offload_codec;
+	int gapless_offload_enable;
+	int send_metadata;
+	int eof_reach;
+	uint32_t compr_padding;
+	uint32_t compr_delay;
 	uint64_t compr_pcm_io_sample_base;
 	int offload_temp_data_buf_size;
 	struct timer_list timer; /* For advancing the hw ptr */
@@ -413,6 +421,9 @@ int teardown_voipcall(struct aoc_alsa_stream *alsa_stream);
 
 void aoc_compr_offload_isr(struct aoc_service_dev *dev);
 int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type);
+int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream);
+int aoc_compr_offload_partial_drain(struct aoc_alsa_stream *alsa_stream);
+int aoc_compr_offload_close(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream, uint64_t *sample);
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream);
 int aoc_compr_pause(struct aoc_alsa_stream *alsa_stream);

@@ -114,6 +114,28 @@ static struct aoc_alsa_stream *find_alsa_stream_by_device_idx(struct aoc_chip *c
 	return NULL;
 }
 
+static struct aoc_alsa_stream *find_alsa_stream_by_capture_stream(struct aoc_chip *chip)
+{
+	int i;
+
+	if (aoc_audio_capture_active_stream_num(chip) == 0)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(chip->alsa_stream); i++) {
+		struct aoc_alsa_stream *alsa_stream = chip->alsa_stream[i];
+		if (!alsa_stream)
+			continue;
+
+		if (!alsa_stream->substream)
+			continue;
+
+		if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			return chip->alsa_stream[i];
+	}
+
+	return NULL;
+}
+
 static int hw_id_to_phone_mic_source(int hw_id)
 {
 	int mic_input_source;
@@ -148,7 +170,7 @@ static int aoc_audio_stream_type[] = {
 	[15] = NORMAL, [16] = NORMAL,  [17] = NORMAL,	   [18] = INCALL, [19] = INCALL,
 	[20] = INCALL, [21] = INCALL,  [22] = INCALL,	   [23] = MMAPED, [24] = NORMAL,
 	[25] = HIFI,   [26] = HIFI,    [27] = ANDROID_AEC, [28] = MMAPED, [29] = INCALL,
-	[30] = NORMAL,
+	[30] = NORMAL, [31] = CAP_INJ,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
@@ -2478,10 +2500,91 @@ static int aoc_audio_android_aec_stop(struct aoc_alsa_stream *alsa_stream)
 	return 0;
 }
 
+static int aoc_audio_capture_inject_params_check(struct aoc_alsa_stream *alsa_stream)
+{
+	int err = 0;
+	int active_mic = 0;
+	int i;
+	struct aoc_alsa_stream *active_capture_stream;
+	if (alsa_stream->stream_type == CAP_INJ) {
+		active_capture_stream = find_alsa_stream_by_capture_stream(alsa_stream->chip);
+		if (active_capture_stream == NULL) {
+			pr_err("No valid capture stream to inject\n");
+			return -EINVAL;
+		}
+		/* Capture injection is replacing the PDM mic data NOT the recording data,
+		 * So it need to compare with the PDM mic format */
+		/* checking if format is match */
+		/*
+		if (alsa_stream->params_rate != active_capture_stream->params_rate) {
+			pr_err("[CAP_INJ] sample rate mismatch %d vs %d\n",
+				alsa_stream->params_rate, active_capture_stream->params_rate);
+			err = -EINVAL;
+		}
+		if (alsa_stream->pcm_format_width != active_capture_stream->pcm_format_width) {
+			pr_err("[CAP_INJ] width mismatch %d vs %d\n",
+				alsa_stream->pcm_format_width,
+				active_capture_stream->pcm_format_width);
+			err = -EINVAL;
+		}
+		*/
+		for (i = 0; i < ARRAY_SIZE(alsa_stream->chip->buildin_mic_id_list); i++) {
+			if (alsa_stream->chip->buildin_mic_id_list[i] != -1)
+				active_mic ++;
+		}
+		if (alsa_stream->channels != active_mic) {
+			pr_err("[CAP_INJ] channels and active mic mismatch %d vs %d\n",
+				alsa_stream->channels, active_mic);
+			err = -EINVAL;
+		}
+	} else {
+		pr_err("[CAP_INJ] incorrect stream type %d\n", alsa_stream->stream_type);
+		err = -EINVAL;
+	}
+	return err;
+}
+
+static int aoc_audio_capture_inject_start(struct aoc_alsa_stream *alsa_stream)
+{
+	int err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	err = aoc_audio_capture_inject_params_check(alsa_stream);
+	if (err < 0)
+		return err;
+
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL,
+			CMD_AUDIO_INPUT_CAPTURE_INJECTION_START_ID, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in audio capture inject start\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+static int aoc_audio_capture_inject_stop(struct aoc_alsa_stream *alsa_stream)
+{
+	int err = 0;
+	struct aoc_chip *chip = alsa_stream->chip;
+
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL,
+			CMD_AUDIO_INPUT_CAPTURE_INJECTION_STOP_ID, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in audio capture inject stop\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 {
 	int stream, err = 0;
 	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->stream_type == CAP_INJ)
+		return aoc_audio_capture_inject_start(alsa_stream);
 
 	if (alsa_stream->stream_type == HIFI)
 		return aoc_audio_hifi_start(alsa_stream);
@@ -2511,6 +2614,9 @@ int aoc_audio_incall_stop(struct aoc_alsa_stream *alsa_stream)
 {
 	int stream, err = 0;
 	struct aoc_chip *chip = alsa_stream->chip;
+
+	if (alsa_stream->stream_type == CAP_INJ)
+		return aoc_audio_capture_inject_stop(alsa_stream);
 
 	if (alsa_stream->stream_type == HIFI)
 		return aoc_audio_hifi_stop(alsa_stream);
@@ -3306,7 +3412,11 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 	struct CMD_AUDIO_OUTPUT_DECODER_CFG cmd;
 
 	/* TODO: refactor may be needed for passing codec info from HAL to AoC */
-	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_DECODER_CFG_ID, sizeof(cmd));
+	AocCmdHdrSet(&(cmd.parent),
+		alsa_stream->gapless_offload_enable?
+			CMD_AUDIO_OUTPUT_DECODER_CFG_GAPLESS_ID:
+			CMD_AUDIO_OUTPUT_DECODER_CFG_ID,
+		sizeof(cmd));
 
 	/* TODO: HAL only passes MP3 or AAC, need to consider/test other AAC options */
 	cmd.cfg.format = (type == SND_AUDIOCODEC_MP3) ? AUDIO_OUTPUT_DECODER_MP3 :
@@ -3323,6 +3433,78 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 				alsa_stream->chip);
 	if (err < 0) {
 		pr_err("ERR:%d in set compress offload codec\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream)
+{
+	int err;
+	struct CMD_AUDIO_OUTPUT_DECODER_GAPLESS_METADATA cmd;
+
+	if (!alsa_stream->gapless_offload_enable)
+		return 0;
+
+	if (!alsa_stream->send_metadata)
+		return 0;
+
+	if (alsa_stream->compr_padding == COMPR_INVALID_METADATA ||
+	    alsa_stream->compr_delay == COMPR_INVALID_METADATA) {
+		pr_warn("invalid metadata\n");
+		return 0;
+	}
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_DECODER_GAPLESS_METADATA_ID, sizeof(cmd));
+	cmd.curr_track_padding_frames = alsa_stream->compr_padding;
+	cmd.curr_track_delay_frames = alsa_stream->compr_delay;
+
+	pr_info("send metadata, padding %d , delay %d\n", cmd.curr_track_padding_frames,
+		cmd.curr_track_delay_frames);
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL,
+				alsa_stream->chip);
+
+	if (err < 0) {
+		pr_err("ERR:%d in set aoc compress offload in partial drain state\n", err);
+		return err;
+	}
+
+	alsa_stream->send_metadata = 0;
+	return 0;
+}
+
+int aoc_compr_offload_partial_drain(struct aoc_alsa_stream *alsa_stream)
+{
+	int err;
+
+	if (!alsa_stream->gapless_offload_enable)
+		return 0;
+
+	pr_info("compress offload partial drain\n");
+
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL,
+		CMD_AUDIO_OUTPUT_DECODER_GAPLESS_PARTIAL_DRAIN_ID, alsa_stream->chip);
+	if (err < 0)
+		pr_err("ERR:%d compress offload partial drain!\n", err);
+
+	return err;
+}
+
+int aoc_compr_offload_close(struct aoc_alsa_stream *alsa_stream)
+{
+	int err;
+
+	if (!alsa_stream->gapless_offload_enable)
+		return 0;
+
+	pr_info("compress offload decoder de-inited\n");
+
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL,
+		CMD_AUDIO_OUTPUT_DECODER_GAPLESS_DEINIT_ID, alsa_stream->chip);
+	if (err < 0) {
+		pr_err("ERR:%d in compress offload close\n", err);
 		return err;
 	}
 
@@ -3353,12 +3535,10 @@ int aoc_compr_offload_get_io_samples(struct aoc_alsa_stream *alsa_stream, uint64
 int aoc_compr_offload_flush_buffer(struct aoc_alsa_stream *alsa_stream)
 {
 	int err;
-	struct CMD_HDR cmd;
 
-	AocCmdHdrSet(&cmd, CMD_AUDIO_OUTPUT_DECODE_FLUSH_RB_ID, sizeof(cmd));
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL,
+		CMD_AUDIO_OUTPUT_DECODE_FLUSH_RB_ID, alsa_stream->chip);
 
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), NULL, alsa_stream->chip);
 	if (err < 0)
 		pr_err("ERR:%d flush compress offload buffer fail!\n", err);
 
