@@ -758,6 +758,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
+	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
@@ -787,7 +788,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	aoc_board_config_parse(prvdata->dev->of_node, &board_id, &board_rev);
 
-	if (!fw) {
+	if ((!fw)||(dt_prevent_aoc_load)) {
 		dev_err(dev, "failed to load firmware image\n");
 		return;
 	}
