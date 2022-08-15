@@ -746,6 +746,7 @@ err_alloc:
 
 static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 {
+	static bool first_load_prevented = false;
 	struct device *dev = ctx;
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
 	u32 sram_was_repaired = aoc_sram_was_repaired(prvdata);
@@ -786,10 +787,16 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset, bootloader_offset;
 
+	if ((dt_prevent_aoc_load) && (!first_load_prevented)) {
+		dev_err(dev, "DTS settings prevented AoC firmware from being loaded\n");
+		first_load_prevented = true;
+		return;
+	}
+
 	aoc_board_config_parse(prvdata->dev->of_node, &board_id, &board_rev);
 
-	if ((!fw)||(dt_prevent_aoc_load)) {
-		dev_err(dev, "failed to load firmware image\n");
+	if (!fw) {
+		dev_err(dev, "Failed to load AoC firmware image\n");
 		return;
 	}
 
