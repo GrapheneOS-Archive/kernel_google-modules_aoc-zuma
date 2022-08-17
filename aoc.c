@@ -1513,6 +1513,11 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 		return rc;
 	}
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	/* Temporarily disable AoC restart on Zuma because it causes kernel panic (b/243033289) */
+	return rc;
+#endif
+
 	aoc_reset_successful = false;
 	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
 	disable_irq_nosync(prvdata->sysmmu_secure_irq);
