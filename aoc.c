@@ -2530,9 +2530,11 @@ static void aoc_watchdog(struct work_struct *work)
 	unsigned long carveout_paddr_from_aoc;
 	unsigned long carveout_vaddr_from_aoc;
 	size_t i;
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	size_t num_pages;
 	struct page **dram_pages = NULL;
 	void *dram_cached = NULL;
+#endif
 	int sscd_retries = 20;
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
@@ -2593,6 +2595,8 @@ static void aoc_watchdog(struct work_struct *work)
 			RAMDUMP_SECTION_CRASH_INFO_SIZE);
 	}
 
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
+	/* Don't map AoC carveout as cached due to b/240786634 */
 	num_pages = DIV_ROUND_UP(prvdata->dram_size, PAGE_SIZE);
 	dram_pages = vmalloc(num_pages * sizeof(*dram_pages));
 	if (!dram_pages) {
@@ -2609,6 +2613,7 @@ static void aoc_watchdog(struct work_struct *work)
 			"aoc coredump failed: vmap dram_pages failed\n");
 		goto err_vmap;
 	}
+#endif
 
 	if (ramdump_header->valid) {
 		const char *crash_reason = (const char *)ramdump_header +
@@ -2631,7 +2636,11 @@ static void aoc_watchdog(struct work_struct *work)
 	carveout_paddr_from_aoc = 0x98000000;
 	carveout_vaddr_from_aoc = 0x78000000;
 	/* Entire AoC DRAM carveout, coredump is stored within the carveout */
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	sscd_info.segs[0].addr = prvdata->dram_virt;
+#else
 	sscd_info.segs[0].addr = dram_cached;
+#endif
 	sscd_info.segs[0].size = prvdata->dram_size;
 	sscd_info.segs[0].paddr = (void *)carveout_paddr_from_aoc;
 	sscd_info.segs[0].vaddr = (void *)carveout_vaddr_from_aoc;
@@ -2660,11 +2669,13 @@ static void aoc_watchdog(struct work_struct *work)
 		dev_err(prvdata->dev, "aoc coredump failed: sscd_rc = %d\n", sscd_rc);
 	}
 
+#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	if (dram_cached)
 		vunmap(dram_cached);
 err_vmap:
 	vfree(dram_pages);
 err_vmalloc:
+#endif
 err_coredump:
 	/* make sure there is no AoC startup work active */
 	cancel_work_sync(&prvdata->online_work);
