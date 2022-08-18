@@ -68,6 +68,9 @@ struct xhci_vendor_data {
 	bool dt_direct_usb_access;
 	bool offload_state;
 
+	/* count how many usb audio devices are connected */
+	int usb_audio_count;
+
 	enum usb_offload_op_mode op_mode;
 
 	struct workqueue_struct *irq_wq;
@@ -120,6 +123,7 @@ extern int xhci_handle_event(struct xhci_hcd *xhci);
 extern void xhci_update_erst_dequeue(struct xhci_hcd *xhci,
 				     union xhci_trb *event_ring_deq);
 extern int xhci_exynos_register_vendor_ops(struct xhci_vendor_ops *vendor_ops);
+int xhci_get_usb_audio_count(struct xhci_hcd *xhci);
 int xhci_set_offload_state(struct xhci_hcd *xhci, bool enabled);
 struct xhci_hcd *get_xhci_hcd_by_udev(struct usb_device *udev);
 
