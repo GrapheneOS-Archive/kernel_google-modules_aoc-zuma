@@ -65,6 +65,12 @@ static atomic_t channel_index_counter = ATOMIC_INIT(1);
 static int aocc_probe(struct aoc_service_dev *dev);
 static int aocc_remove(struct aoc_service_dev *dev);
 
+static const char * const wakelock_names[] = {
+	"usf_queue",
+	"usf_queue_non_wake_up",
+	NULL,
+};
+
 static const char * const channel_service_names[] = {
 	"com.google.usf",
 	"com.google.usf.non_wake_up",
@@ -763,7 +769,8 @@ static void aocc_sh_mem_doorbell_probe(struct aoc_service_dev *dev)
 static int aocc_probe(struct aoc_service_dev *dev)
 {
 	struct chan_prvdata *prvdata;
-	int ret = 0;
+	int ret = 0, i = 0;
+	bool service_found = false;
 	struct sched_param param = {
 		.sched_priority = 10,
 	};
@@ -779,7 +786,16 @@ static int aocc_probe(struct aoc_service_dev *dev)
 		if (ret)
 			return ret;
 		prvdata->user_wakelock = wakeup_source_register(&dev->dev, dev_name(&dev->dev));
-		prvdata->queue_wakelock = wakeup_source_register(&dev->dev, "usf_queue");
+		for (i = 0; i < ARRAY_SIZE(wakelock_names); i++) {
+			if (strcmp(dev_name(&dev->dev), channel_service_names[i]) == 0) {
+				prvdata->queue_wakelock = wakeup_source_register(&dev->dev,
+										 wakelock_names[i]);
+				service_found = true;
+				break;
+			}
+		}
+		if (!service_found)
+			return -EINVAL;
 		dev->prvdata = prvdata;
 		prvdata->demux_task =  kthread_run(&aocc_demux_kthread, dev, dev_name(&dev->dev));
 		sched_setscheduler(prvdata->demux_task, SCHED_FIFO, &param);
