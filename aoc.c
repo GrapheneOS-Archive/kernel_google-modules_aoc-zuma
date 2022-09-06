@@ -2150,7 +2150,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		dev_err(dev, "mapping modem failed\n");
 
 	/* Map in USB for low power audio */
-	if (iommu_map(domain, 0x9E500000, 0x11100000, SZ_1M,
+	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping usb failed\n");
 
