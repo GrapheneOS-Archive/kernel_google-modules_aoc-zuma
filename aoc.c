@@ -258,9 +258,18 @@ static struct aoc_control_block *aoc_control;
 static int aoc_major;
 
 static const char *default_firmware = "aoc.bin";
-static bool aoc_autoload_firmware;
+static bool aoc_autoload_firmware = false;
 module_param(aoc_autoload_firmware, bool, 0644);
 MODULE_PARM_DESC(aoc_autoload_firmware, "Automatically load firmware if true");
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+/* Temporarily disable AoC restart on Zuma because it causes kernel panic (b/243033289) */
+static bool aoc_disable_restart = true;
+#else
+static bool aoc_disable_restart = false;
+#endif
+module_param(aoc_disable_restart, bool, 0644);
+MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
@@ -1507,10 +1516,9 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 		return rc;
 	}
 
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
-	/* Temporarily disable AoC restart on Zuma because it causes kernel panic (b/243033289) */
-	return rc;
-#endif
+	if (aoc_disable_restart) {
+		return rc;
+	}
 
 	aoc_reset_successful = false;
 	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
