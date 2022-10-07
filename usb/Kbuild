@@ -4,4 +4,4 @@
 #
 
 obj-$(CONFIG_AOC_DRIVER)	+= aoc_usb_driver.o
-aoc_usb_driver-objs		:= aoc_usb_dev.o xhci_hooks_impl_whi.o usb_hooks_impl_whi.o
+aoc_usb_driver-objs		:= aoc_usb_dev.o
