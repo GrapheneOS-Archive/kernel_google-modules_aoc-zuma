@@ -79,6 +79,8 @@ int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring);
 
 bool is_aoc_usb_probe_done(void);
 
+int xhci_offload_helper_init(void);
+
 extern int dwc3_otg_host_enable(bool enabled);
 
 #endif /* __LINUX_AOC_USB_H */
