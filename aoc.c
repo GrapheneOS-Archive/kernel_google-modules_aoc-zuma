@@ -2208,6 +2208,7 @@ static void aoc_monitor_online(struct work_struct *work)
 		return;
 #endif
 
+		disable_irq_nosync(prvdata->watchdog_irq);
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
 		if (restart_rc == AOC_RESTART_DISABLED_RC) {
