@@ -2140,6 +2140,7 @@ static void aoc_monitor_online(struct work_struct *work)
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
 
+		disable_irq_nosync(prvdata->watchdog_irq);
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
 		if (restart_rc)
