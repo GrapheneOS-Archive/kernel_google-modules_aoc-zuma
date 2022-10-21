@@ -3460,7 +3460,7 @@ int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream)
 	cmd.curr_track_padding_frames = alsa_stream->compr_padding;
 	cmd.curr_track_delay_frames = alsa_stream->compr_delay;
 
-	pr_info("send metadata, padding %d , delay %d\n", cmd.curr_track_padding_frames,
+	pr_info("send metadata, padding %d, delay %d\n", cmd.curr_track_padding_frames,
 		cmd.curr_track_delay_frames);
 
 	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL,

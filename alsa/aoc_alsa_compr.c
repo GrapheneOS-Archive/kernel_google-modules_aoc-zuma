@@ -76,7 +76,7 @@ static void aoc_compr_reset_pointer(struct aoc_alsa_stream *alsa_stream)
 	alsa_stream->n_overflow = 0;
 	cstream->runtime->total_bytes_available = 0;
 
-	pr_debug("%s hw_ptr_base =%lu compr_pcm_io_sample_base = %llu\n",
+	pr_debug("%s hw_ptr_base = %lu compr_pcm_io_sample_base = %llu\n",
 		__func__, alsa_stream->hw_ptr_base, alsa_stream->compr_pcm_io_sample_base);
 
 }
