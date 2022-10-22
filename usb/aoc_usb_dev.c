@@ -16,7 +16,6 @@
 
 #include "aoc.h"
 #include "aoc-interface.h"
-
 #include "aoc_usb.h"
 
 #define AOC_USB_NAME "aoc_usb"
@@ -29,6 +28,73 @@ enum {
 	TYPE_END_OF_SETUP,
 	TYPE_DCBAA
 };
+
+static BLOCKING_NOTIFIER_HEAD(aoc_usb_notifier_list);
+
+int register_aoc_usb_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&aoc_usb_notifier_list, nb);
+}
+
+int unregister_aoc_usb_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&aoc_usb_notifier_list, nb);
+}
+
+int notify_offload_state(bool enabled)
+{
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_OFFLOAD_STATE, &enabled);
+	return 0;
+}
+
+int xhci_set_dcbaa_ptr(u64 aoc_dcbaa_ptr)
+{
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_DCBAA_PTR, &aoc_dcbaa_ptr);
+	return 0;
+}
+
+int xhci_setup_done(void)
+{
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SETUP_DONE, NULL);
+	return 0;
+}
+
+int xhci_sync_conn_stat(unsigned int bus_id, unsigned int dev_num, unsigned int slot_id,
+			       unsigned int conn_stat)
+{
+	struct conn_stat_args args;
+
+	args.bus_id = bus_id;
+	args.dev_num = dev_num;
+	args.slot_id = slot_id;
+	args.conn_stat = conn_stat;
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SYNC_CONN_STAT, &args);
+
+	return 0;
+}
+
+int usb_host_mode_state_notify(enum aoc_usb_state usb_state)
+{
+	return xhci_sync_conn_stat(0, 0, 0, usb_state);
+}
+
+int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring)
+{
+	struct get_isoc_tr_info_args tr_info;
+
+	tr_info.ep_id = ep_id;
+	tr_info.dir = dir;
+	tr_info.num_segs = ep_ring->num_segs;
+	tr_info.max_packet = ep_ring->bounce_buf_len;
+	tr_info.type = ep_ring->type;
+	tr_info.seg_ptr = ep_ring->first_seg->dma;
+	tr_info.cycle_state = ep_ring->cycle_state;
+	tr_info.num_trbs_free = ep_ring->num_trbs_free;
+
+	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_ISOC_TR_INFO, &tr_info);
+
+	return 0;
+}
 
 static ssize_t aoc_usb_send_command(struct aoc_usb_drvdata *drvdata,
 				    void *in_cmd, size_t in_size, void *out_cmd,
@@ -64,68 +130,11 @@ out:
 	return ret;
 }
 
-static int aoc_usb_get_dev_ctx(struct aoc_usb_drvdata *drvdata,
-			       unsigned int slot_id, size_t length, u8 *dev_ctx)
-{
-	int ret = 0;
-	struct CMD_USB_CONTROL_GET_DEVICE_CONTEXT *cmd;
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_GET_DEVICE_CONTEXT), GFP_KERNEL);
-	if (!cmd)
-		return -ENOMEM;
-
-	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_GET_DEVICE_CONTEXT_ID,
-		     sizeof(*cmd));
-
-	cmd->device_id = slot_id;
-	cmd->length = length;
-
-	dev_dbg(&drvdata->adev->dev, "cmd=(%u, %u)\n", cmd->device_id, cmd->length);
-	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
-	if (ret < 0) {
-		kfree(cmd);
-		return ret;
-	}
-
-	memcpy(dev_ctx, cmd->payload, length);
-
-	kfree(cmd);
-
-	return 0;
-}
-
-static int aoc_usb_get_dcbaa_ptr(struct aoc_usb_drvdata *drvdata,
-				 u64 *aoc_dcbaa_ptr)
-{
-	int ret = 0;
-	struct CMD_USB_CONTROL_GET_DCBAA_PTR *cmd;
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_GET_DCBAA_PTR), GFP_KERNEL);
-	if (!cmd)
-		return -ENOMEM;
-
-	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_GET_DCBAA_PTR_ID,
-		     sizeof(*cmd));
-
-	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
-	if (ret < 0) {
-		kfree(cmd);
-		return ret;
-	}
-
-	*aoc_dcbaa_ptr = cmd->aoc_dcbaa_ptr;
-
-	kfree(cmd);
-
-	return 0;
-}
-
 static int aoc_usb_set_dcbaa_ptr(struct aoc_usb_drvdata *drvdata,
 				 u64 *aoc_dcbaa_ptr)
 {
 	int ret = 0;
+
 	struct CMD_USB_CONTROL_SET_DCBAA_PTR *cmd;
 
 	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_DCBAA_PTR), GFP_KERNEL);
@@ -217,43 +226,6 @@ static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, void *data)
 	return 0;
 }
 
-static int aoc_usb_get_isoc_tr_info(struct aoc_usb_drvdata *drvdata, void *args)
-{
-	int ret;
-	struct get_isoc_tr_info_args *tr_info_args =
-		(struct get_isoc_tr_info_args *)args;
-	struct CMD_USB_CONTROL_GET_ISOC_TR_INFO *cmd;
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_GET_ISOC_TR_INFO), GFP_KERNEL);
-	if (!cmd)
-		return -ENOMEM;
-
-	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_GET_ISOC_TR_INFO_ID,
-		     sizeof(*cmd));
-
-	cmd->ep_id = tr_info_args->ep_id;
-	cmd->dir = tr_info_args->dir;
-
-	dev_dbg(&drvdata->adev->dev, "ep_id=%u, dir=%u\n", cmd->ep_id, cmd->dir);
-	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
-	if (ret < 0) {
-		kfree(cmd);
-		return ret;
-	}
-
-	tr_info_args->type = cmd->type;
-	tr_info_args->num_segs = cmd->num_segs;
-	tr_info_args->seg_ptr = cmd->seg_ptr;
-	tr_info_args->max_packet = cmd->max_packet;
-	tr_info_args->cycle_state = cmd->cycle_state;
-	tr_info_args->num_trbs_free = cmd->num_trbs_free;
-
-	kfree(cmd);
-
-	return 0;
-}
-
 static int aoc_usb_set_isoc_tr_info(struct aoc_usb_drvdata *drvdata, void *args)
 {
 	int ret;
@@ -321,26 +293,13 @@ static int aoc_usb_notify(struct notifier_block *this,
 	struct aoc_usb_drvdata *drvdata =
 		container_of(this, struct aoc_usb_drvdata, nb);
 	int ret;
-	struct get_dev_ctx_args *dev_ctx_args;
 
 	switch (code) {
-	case SYNC_DEVICE_CONTEXT:
-		dev_ctx_args = data;
-		ret = aoc_usb_get_dev_ctx(drvdata, dev_ctx_args->slot_id,
-					  dev_ctx_args->length,
-					  dev_ctx_args->dev_ctx);
-		break;
-	case GET_DCBAA_PTR:
-		ret = aoc_usb_get_dcbaa_ptr(drvdata, data);
-		break;
 	case SET_DCBAA_PTR:
 		ret = aoc_usb_set_dcbaa_ptr(drvdata, data);
 		break;
 	case SETUP_DONE:
 		ret = aoc_usb_setup_done(drvdata);
-		break;
-	case GET_ISOC_TR_INFO:
-		ret = aoc_usb_get_isoc_tr_info(drvdata, data);
 		break;
 	case SET_ISOC_TR_INFO:
 		ret = aoc_usb_set_isoc_tr_info(drvdata, data);
@@ -359,7 +318,6 @@ static int aoc_usb_notify(struct notifier_block *this,
 
 	if (ret < 0)
 		dev_err(&drvdata->adev->dev, "Fail to handle code %lu, ret = %d", code, ret);
-
 	return ret;
 }
 
@@ -430,23 +388,31 @@ static void usb_host_mode_checking_work(struct work_struct *ws)
 	return;
 }
 
-bool aoc_usb_probe_done;
+/*
+ * This variable used to present if aoc_usb module was probed done. If offload
+ * is enabled, the controller needs to wait for the aoc_usb probe done and then
+ * continue the controller's probe.
+ */
+static bool aoc_usb_probe_done;
 static int aoc_usb_probe(struct aoc_service_dev *adev)
 {
 	struct device *dev = &adev->dev;
 	struct aoc_usb_drvdata *drvdata;
 
 	drvdata = kzalloc(sizeof(*drvdata), GFP_KERNEL);
-	if (!drvdata)
+	if (!drvdata) {
 		return -ENOMEM;
+	}
 
 	drvdata->adev = adev;
 
 	mutex_init(&drvdata->lock);
 
 	drvdata->ws = wakeup_source_register(dev, dev_name(dev));
-	if (!drvdata->ws)
+	if (!drvdata->ws) {
+		dev_err(&drvdata->adev->dev, "wakeup_source_register failed!\n");
 		return -ENOMEM;
+	}
 
 	drvdata->usb_conn_state = 0;
 	drvdata->service_timeout = msecs_to_jiffies(100);
@@ -497,6 +463,11 @@ static int aoc_usb_remove(struct aoc_service_dev *adev)
 	return 0;
 }
 
+bool is_aoc_usb_probe_done(void)
+{
+	return aoc_usb_probe_done;
+}
+
 static const char *const aoc_usb_service_names[] = {
 	"usb_control",
 	NULL,
@@ -513,10 +484,6 @@ static struct aoc_driver aoc_usb_driver = {
 
 static int __init aoc_usb_init(void)
 {
-	xhci_vendor_helper_init();
-	usb_vendor_helper_init();
-	snd_usb_audio_vendor_helper_init();
-
 	INIT_WORK(&usb_recovery_ws, usb_recovery_work);
 	INIT_WORK(&usb_host_mode_checking_ws, usb_host_mode_checking_work);
 
