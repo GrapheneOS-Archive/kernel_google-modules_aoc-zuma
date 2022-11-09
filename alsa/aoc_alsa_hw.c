@@ -1890,6 +1890,13 @@ static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int re
 
 	pr_info("%s: %d", __func__, record_cmd);
 
+	/* Update Buildin MIC broken state */
+	if (chip->audio_capture_mic_source == BUILTIN_MIC && record_cmd == STOP) {
+		chip->broken_detect_count %= NUM_OF_MIC_BROKEN_RECORD;
+		aoc_buildin_mic_broken_get(
+			chip, &chip->buildin_mic_broken_detect[chip->broken_detect_count++]);
+	}
+
 	if (alsa_stream->stream_type == NORMAL) {
 		err = ap_data_control_trigger(chip, alsa_stream, record_cmd);
 		if (err < 0)
@@ -2142,6 +2149,28 @@ int aoc_mmap_record_gain_set(struct aoc_chip *chip, long val)
 		return err;
 	}
 
+	return 0;
+}
+
+int aoc_buildin_mic_broken_get(struct aoc_chip *chip, int *val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	component = 0;
+	key = 16;
+
+	/* Send cmd to AOC */
+	err = aoc_audio_get_parameters(cmd_id, block, component, key, &value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d %s\n", err, __func__);
+		return err;
+	}
+
+	if (val)
+		*val = value;
 	return 0;
 }
 
