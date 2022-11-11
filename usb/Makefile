@@ -5,10 +5,6 @@ M ?= $(shell pwd)
 
 KBUILD_OPTIONS	+= CONFIG_AOC_DRIVER=m
 
-EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-modules/aoc_ipc
-EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-modules/aoc
-EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../aosp/drivers/usb/host
-EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-module/soc/gs/drivers/usb/dwc3
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/aoc/Module.symvers
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/aoc/alsa/Module.symvers
 

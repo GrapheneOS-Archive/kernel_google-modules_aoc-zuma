@@ -3,5 +3,10 @@
 # ASoC-based USB driver
 #
 
+ccflags-y += -I$(srctree)/drivers/usb/host
+ccflags-y += -I$(srctree)/../private/google-modules/aoc_ipc
+ccflags-y += -I$(srctree)/../private/google-modules/aoc
+ccflags-y += -I$(srctree)/../private/google-module/soc/gs/drivers/usb/dwc3
+
 obj-$(CONFIG_AOC_DRIVER)	+= aoc_usb_driver.o
 aoc_usb_driver-objs		:= aoc_usb_dev.o
