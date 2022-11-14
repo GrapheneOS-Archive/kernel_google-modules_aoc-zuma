@@ -57,8 +57,8 @@ static DEFINE_MUTEX(aocc_write_lock);
 static DEFINE_MUTEX(s_open_files_lock);
 
 #define AOCC_MAX_MSG_SIZE 1024
-#define AOCC_MAX_PENDING_MSGS 32
-#define AOCC_BLOCK_CHANNEL_THRESHOLD (AOCC_MAX_PENDING_MSGS - 3)
+#define AOCC_MAX_PENDING_MSGS 128
+#define AOCC_BLOCK_CHANNEL_THRESHOLD 64
 static atomic_t channel_index_counter = ATOMIC_INIT(1);
 
 /* Driver methods */
