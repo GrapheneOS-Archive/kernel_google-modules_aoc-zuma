@@ -271,7 +271,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 		uint16_t cmd_id = ((struct CMD_HDR *)cmd)->id;
 		char reset_reason[40];
 
-		scnprintf(reset_reason, sizeof(reset_reason), "No response to ALSA command %#06x",
+		scnprintf(reset_reason, sizeof(reset_reason), "ALSA command timeout %#06x",
 			cmd_id);
 		pr_err(ALSA_AOC_CMD " ERR:timeout - cmd [%s] id %#06x\n",
 		       CMD_CHANNEL(dev), cmd_id);
