@@ -109,6 +109,8 @@ enum uc_device_id {
 #define alsa2chip(vol) (vol) /* Convert alsa to chip volume */
 #define chip2alsa(vol) (vol) /* Convert chip to alsa volume */
 
+#define MAX_NUM_OF_MAILBOX_INDEX 15
+
 #define NULL_PATH -1
 
 /* Define trigger aoc watchdog reason */
@@ -204,6 +206,9 @@ enum { NONBLOCKING = 0, BLOCKING = 1 };
 enum { STOP = 0, START };
 enum { PLAYBACK_MODE, VOICE_TX_MODE, VOICE_RX_MODE, HAPTICS_MODE, OFFLOAD_MODE };
 
+enum { TIMER = 0, INTR };
+enum { PCM_CHANNEL = 4, INCALL_HIFI_CHANNEL, VOIP_CHANNEL};
+
 struct aoc_chip {
 	struct snd_card *card;
 	struct snd_soc_jack jack; /* TODO: temporary use, need refactor  */
@@ -290,6 +295,7 @@ struct aoc_alsa_stream {
 	int idx; /* PCM device number */
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
 	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
+	int isr_type; /* timer, interrupt */
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
@@ -306,11 +312,13 @@ struct aoc_alsa_stream {
 	int open;
 	int running;
 	int draining;
+	int wq_busy_count;
 
 	struct work_struct free_aoc_service_work;
 	struct work_struct pcm_period_work;
 };
 
+bool aoc_support_interrupt_idx(int idx);
 void aoc_timer_start(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_restart(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_stop(struct aoc_alsa_stream *alsa_stream);
@@ -431,6 +439,9 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);
 int prepare_voipcall(struct aoc_alsa_stream *alsa_stream);
 int teardown_voipcall(struct aoc_alsa_stream *alsa_stream);
 
+void aoc_pcm_isr(struct aoc_service_dev *dev);
+void aoc_incall_hifi_isr(struct aoc_service_dev *dev);
+void aoc_voip_isr(struct aoc_service_dev *dev);
 void aoc_compr_offload_isr(struct aoc_service_dev *dev);
 int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type);
 int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream);
