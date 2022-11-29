@@ -591,6 +591,9 @@ static int aoc_compr_pointer(struct snd_soc_component *component, struct snd_com
 		 runtime->total_bytes_available - arg->copied_total, arg->pcm_io_frames,
 		 arg->sampling_rate, alsa_stream->compr_pcm_io_sample_base);
 
+	if ((runtime->total_bytes_available - arg->copied_total) == runtime->buffer_size)
+		__pm_relax(alsa_stream->chip->wakelock);
+
 	return 0;
 }
 
