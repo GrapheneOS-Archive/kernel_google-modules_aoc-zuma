@@ -133,6 +133,8 @@
 	#define AOC_CLOCK_DIVIDER 1
 #endif
 
+#define AOC_RESTART_DISABLED_RC (0xD15AB1ED)
+
 #define MAX_SENSOR_POWER_NUM 5
 
 static DEFINE_MUTEX(aoc_service_lock);
@@ -1517,7 +1519,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	}
 
 	if (aoc_disable_restart) {
-		return rc;
+		return AOC_RESTART_DISABLED_RC;
 	}
 
 	aoc_reset_successful = false;
@@ -2205,12 +2207,16 @@ static void aoc_monitor_online(struct work_struct *work)
 
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
-		if (restart_rc)
+		if (restart_rc == AOC_RESTART_DISABLED_RC) {
+			dev_info(prvdata->dev,
+				"aoc restart is disabled\n");
+		} else if (restart_rc) {
 			dev_info(prvdata->dev,
 				"aoc restart failed: rc = %d\n", restart_rc);
-		else
+		} else {
 			dev_info(prvdata->dev,
 				"aoc restart succeeded\n");
+		}
 	}
 	mutex_unlock(&aoc_service_lock);
 }
@@ -2685,10 +2691,13 @@ err_coredump:
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
 	restart_rc = aoc_watchdog_restart(prvdata);
-	if (restart_rc)
+	if (restart_rc == AOC_RESTART_DISABLED_RC) {
+		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
+	} else if (restart_rc) {
 		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
-	else
+	} else {
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+	}
 
 	mutex_unlock(&aoc_service_lock);
 }
