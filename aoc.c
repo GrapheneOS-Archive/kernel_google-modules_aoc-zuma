@@ -770,6 +770,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
+	u32 rand_seed = get_random_u32();
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
@@ -792,8 +793,10 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
 		{ .key = kAOCEnableUART, .value = enable_uart },
-		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic }
+		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic },
+		{ .key = kAOCRandSeed, .value = rand_seed }
 	};
+
 	const char *version;
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset, bootloader_offset;
