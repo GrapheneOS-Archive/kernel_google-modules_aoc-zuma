@@ -1036,9 +1036,6 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 	if (dev->dead)
 		return -ENODEV;
 
-	if (!aoc_platform_device)
-		return -ENODEV;
-
 	prvdata = dev_get_drvdata(dev->dev.parent);
 	if (!prvdata)
 		return -ENODEV;
@@ -1195,9 +1192,6 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 		return -EINVAL;
 
 	if (dev->dead)
-		return -ENODEV;
-
-	if (!aoc_platform_device)
 		return -ENODEV;
 
 	prvdata = dev_get_drvdata(dev->dev.parent);
