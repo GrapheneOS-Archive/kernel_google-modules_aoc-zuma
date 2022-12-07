@@ -133,6 +133,8 @@
 	#define AOC_CLOCK_DIVIDER 1
 #endif
 
+#define AOC_RESTART_DISABLED_RC (0xD15AB1ED)
+
 #define MAX_SENSOR_POWER_NUM 5
 
 static DEFINE_MUTEX(aoc_service_lock);
@@ -768,6 +770,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
+	u32 rand_seed = get_random_u32();
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
@@ -790,8 +793,10 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCForceVNOM, .value = force_vnom },
 		{ .key = kAOCDisableMM, .value = disable_mm },
 		{ .key = kAOCEnableUART, .value = enable_uart },
-		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic }
+		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic },
+		{ .key = kAOCRandSeed, .value = rand_seed }
 	};
+
 	const char *version;
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset, bootloader_offset;
@@ -1517,7 +1522,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	}
 
 	if (aoc_disable_restart) {
-		return rc;
+		return AOC_RESTART_DISABLED_RC;
 	}
 
 	aoc_reset_successful = false;
@@ -2203,14 +2208,19 @@ static void aoc_monitor_online(struct work_struct *work)
 		return;
 #endif
 
+		disable_irq_nosync(prvdata->watchdog_irq);
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
-		if (restart_rc)
+		if (restart_rc == AOC_RESTART_DISABLED_RC) {
+			dev_info(prvdata->dev,
+				"aoc restart is disabled\n");
+		} else if (restart_rc) {
 			dev_info(prvdata->dev,
 				"aoc restart failed: rc = %d\n", restart_rc);
-		else
+		} else {
 			dev_info(prvdata->dev,
 				"aoc restart succeeded\n");
+		}
 	}
 	mutex_unlock(&aoc_service_lock);
 }
@@ -2685,10 +2695,13 @@ err_coredump:
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
 	restart_rc = aoc_watchdog_restart(prvdata);
-	if (restart_rc)
+	if (restart_rc == AOC_RESTART_DISABLED_RC) {
+		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
+	} else if (restart_rc) {
 		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
-	else
+	} else {
 		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+	}
 
 	mutex_unlock(&aoc_service_lock);
 }
