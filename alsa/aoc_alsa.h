@@ -72,6 +72,7 @@ enum uc_device_id {
 #define NUM_OF_BUILTIN_MIC 4
 #define DEFAULT_AUDIO_SINK_ID 0
 #define MAX_NUM_OF_SINKS_PER_STREAM 2
+#define NUM_OF_MIC_BROKEN_RECORD 5
 
 #define MAX_NUM_OF_INCALL_CAPTURE_STREAM 3
 
@@ -165,6 +166,7 @@ enum {
 	BUILDIN_MIC_POWER_STATE,
 	BUILDIN_MIC_CAPTURE_LIST,
 	BUILDIN_US_MIC_CAPTURE_LIST,
+	BUILDIN_MIC_BROKEN_STATE,
 	A2DP_ENCODER_PARAMETERS,
 };
 
@@ -212,6 +214,8 @@ struct aoc_chip {
 	int default_mic_id;
 	int buildin_mic_id_list[NUM_OF_BUILTIN_MIC];
 	int buildin_us_mic_id_list[NUM_OF_BUILTIN_MIC];
+	int buildin_mic_broken_detect[NUM_OF_MIC_BROKEN_RECORD];
+	int broken_detect_count;
 
 	int default_sink_id;
 	int sink_id_list[MAX_NUM_OF_SINKS_PER_STREAM];
@@ -350,6 +354,7 @@ int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val);
 int aoc_mic_record_gain_set(struct aoc_chip *chip, long val);
 int aoc_mmap_record_gain_get(struct aoc_chip *chip, long *val);
 int aoc_mmap_record_gain_set(struct aoc_chip *chip, long val);
+int aoc_buildin_mic_broken_get(struct aoc_chip *chip, int *val);
 int aoc_audio_capture_mic_prepare(struct aoc_chip *chip);
 int aoc_audio_capture_mic_close(struct aoc_chip *chip);
 int aoc_audio_capture_active_stream_num(struct aoc_chip *chip);

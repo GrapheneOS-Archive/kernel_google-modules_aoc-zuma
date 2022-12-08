@@ -87,6 +87,11 @@ static int snd_aoc_ctl_info(struct snd_kcontrol *kcontrol,
 	} else if (kcontrol->private_value == A2DP_ENCODER_PARAMETERS) {
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
 		uinfo->count = sizeof(struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG);
+	} else if (kcontrol->private_value == BUILDIN_MIC_BROKEN_STATE) {
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+		uinfo->count = NUM_OF_MIC_BROKEN_RECORD;
+		uinfo->value.integer.min = 0;
+		uinfo->value.integer.max = (1 << NUM_OF_BUILTIN_MIC) - 1;
 	}
 	return 0;
 }
@@ -213,6 +218,24 @@ snd_aoc_buildin_us_mic_capture_list_ctl_put(struct snd_kcontrol *kcontrol,
 	for (i = 0; i < NUM_OF_BUILTIN_MIC; i++)
 		chip->buildin_us_mic_id_list[i] =
 			ucontrol->value.integer.value[i];
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int
+snd_aoc_buildin_mic_broken_state_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	int i;
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_MIC_BROKEN_RECORD; i++)
+		ucontrol->value.integer.value[i] =
+			chip->buildin_mic_broken_detect[i]; // geting power state;
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -1813,6 +1836,17 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
 		.info = aoc_dsp_state_ctl_info,
 		.get = aoc_dsp_state_ctl_get,
+		.count = 1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "BUILDIN MIC Broken State",
+		.index = 0,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.private_value = BUILDIN_MIC_BROKEN_STATE,
+		.info = snd_aoc_ctl_info,
+		.get = snd_aoc_buildin_mic_broken_state_get,
+		.put = NULL,
 		.count = 1,
 	},
 
