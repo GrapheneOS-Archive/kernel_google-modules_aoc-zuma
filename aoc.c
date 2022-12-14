@@ -3302,10 +3302,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	 * SysMMU driver trying to access SysMMU SFRs during device suspend/resume operations. The
 	 * latter is problematic if AoC is in monitor mode and BLK_AOC is off. */
 
-// TODO(b/238553911): [Zuma] SysMMU is not enabled after FW load
-#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	pm_runtime_set_suspended(dev);
-#endif
 
 	prvdata->domain = iommu_get_domain_for_dev(dev);
 	if (!prvdata->domain) {
