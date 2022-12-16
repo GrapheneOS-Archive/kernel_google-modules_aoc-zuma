@@ -90,6 +90,8 @@
 #define MAX_FIRMWARE_LENGTH 128
 #define AP_RESET_REASON_LENGTH 32
 #define AOC_S2MPU_CTRL0 0x0
+#define AOC_S2MPU_CTRL_PROTECTION_ENABLE_PER_VID_CLR 0x54
+#define AOC_S2MPU_CTRL_PROTECTION_ENABLE_VID_MASK_ALL 0xFF
 
 #define AOC_MAX_MINOR (1U)
 #define AOC_MBOX_CHANNELS 16
@@ -264,12 +266,7 @@ static bool aoc_autoload_firmware = false;
 module_param(aoc_autoload_firmware, bool, 0644);
 MODULE_PARM_DESC(aoc_autoload_firmware, "Automatically load firmware if true");
 
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
-/* Temporarily disable AoC restart on Zuma because it causes kernel panic (b/243033289) */
-static bool aoc_disable_restart = true;
-#else
 static bool aoc_disable_restart = false;
-#endif
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
@@ -302,6 +299,7 @@ static unsigned long write_blocked_mask;
 
 static bool write_reset_trampoline(u32 addr);
 static bool aoc_a32_release_from_reset(void);
+static bool configure_sensor_regulator(struct aoc_prvdata *prvdata, bool enable);
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata);
 static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size);
 
@@ -1573,6 +1571,15 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	 */
 	writel(prvdata->aoc_s2mpu_saved_value, prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL0);
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	/*
+	 * Zuma S2MPU registers changed. S2MPU_CTRL0.ENABLE functionality is
+	 * replaced by S2MPU_CTRL_PROTECTION_ENABLE_PER_VID.
+	 */
+	writel(AOC_S2MPU_CTRL_PROTECTION_ENABLE_VID_MASK_ALL,
+	       prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL_PROTECTION_ENABLE_PER_VID_CLR);
+#endif
+
 	/* Restore SysMMU settings by briefly setting AoC to runtime active. Since SysMMU is a
 	 * supplier to AoC, it will be set to runtime active as a side effect. */
 	rc = pm_runtime_set_active(prvdata->dev);
@@ -1819,6 +1826,22 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_WO(reset);
 
+static ssize_t sensor_power_enable_store(struct device *dev,
+                                         struct device_attribute *attr,
+                                         const char *buf, size_t count)
+{
+	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
+	int val;
+
+	if (kstrtoint(buf, 10, &val) == 0) {
+		dev_info(prvdata->dev,"sensor_power_enable %d", val);
+		configure_sensor_regulator(prvdata, !!val);
+	}
+	return count;
+}
+
+static DEVICE_ATTR_WO(sensor_power_enable);
+
 static struct attribute *aoc_attrs[] = {
 	&dev_attr_firmware.attr,
 	&dev_attr_revision.attr,
@@ -1829,6 +1852,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_aoc_clock.attr,
 	&dev_attr_aoc_clock_and_kernel_boottime.attr,
 	&dev_attr_reset.attr,
+	&dev_attr_sensor_power_enable.attr,
 	NULL
 };
 
@@ -3296,10 +3320,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	 * SysMMU driver trying to access SysMMU SFRs during device suspend/resume operations. The
 	 * latter is problematic if AoC is in monitor mode and BLK_AOC is off. */
 
-// TODO(b/238553911): [Zuma] SysMMU is not enabled after FW load
-#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	pm_runtime_set_suspended(dev);
-#endif
 
 	prvdata->domain = iommu_get_domain_for_dev(dev);
 	if (!prvdata->domain) {
