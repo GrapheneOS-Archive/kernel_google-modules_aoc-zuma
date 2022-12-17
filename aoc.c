@@ -266,7 +266,12 @@ static bool aoc_autoload_firmware = false;
 module_param(aoc_autoload_firmware, bool, 0644);
 MODULE_PARM_DESC(aoc_autoload_firmware, "Automatically load firmware if true");
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+/* Temporarily disable AoC restart on Zuma because it causes kernel panic (b/243033289) */
+static bool aoc_disable_restart = true;
+#else
 static bool aoc_disable_restart = false;
+#endif
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
