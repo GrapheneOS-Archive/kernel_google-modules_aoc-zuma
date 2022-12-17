@@ -90,6 +90,8 @@
 #define MAX_FIRMWARE_LENGTH 128
 #define AP_RESET_REASON_LENGTH 32
 #define AOC_S2MPU_CTRL0 0x0
+#define AOC_S2MPU_CTRL_PROTECTION_ENABLE_PER_VID_CLR 0x54
+#define AOC_S2MPU_CTRL_PROTECTION_ENABLE_VID_MASK_ALL 0xFF
 
 #define AOC_MAX_MINOR (1U)
 #define AOC_MBOX_CHANNELS 16
@@ -1573,6 +1575,15 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	 * Restore AOC_S2MPU.
 	 */
 	writel(prvdata->aoc_s2mpu_saved_value, prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL0);
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	/*
+	 * Zuma S2MPU registers changed. S2MPU_CTRL0.ENABLE functionality is
+	 * replaced by S2MPU_CTRL_PROTECTION_ENABLE_PER_VID.
+	 */
+	writel(AOC_S2MPU_CTRL_PROTECTION_ENABLE_VID_MASK_ALL,
+	       prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL_PROTECTION_ENABLE_PER_VID_CLR);
+#endif
 
 	/* Restore SysMMU settings by briefly setting AoC to runtime active. Since SysMMU is a
 	 * supplier to AoC, it will be set to runtime active as a side effect. */
