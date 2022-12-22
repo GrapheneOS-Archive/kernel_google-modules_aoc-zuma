@@ -11,6 +11,7 @@ filegroup(
     visibility = [
         ":__subpackages__",
         "//private/devices/google:__subpackages__",
+        "//private/google-modules/touch/common:__pkg__",
     ],
 )
 
