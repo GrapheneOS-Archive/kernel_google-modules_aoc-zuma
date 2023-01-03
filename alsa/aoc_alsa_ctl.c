@@ -1687,10 +1687,11 @@ static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
 
 /* TODO: this has to be consistent to BT/USB Mode enum in aoc_alsa.h */
 static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
-				       "ESCO",	       "A2DP_RAW",
+				       "ESCO",	       "ESCO_SWB",
 				       "A2DP_ENC_SBC", "A2DP_ENC_AAC",
 				       "A2DP_ENC_LC3", "BLE_ENC_LC3",
-				       "BLE_CONVERSATION", "A2DP_ENC_OPUS" };
+				       "BLE_CONVERSATION", "A2DP_ENC_OPUS",
+				       "A2DP_RAW",     "ESCO_LC3" };
 static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
 /* TODO: seek better way to create a series of controls  */
