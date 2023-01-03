@@ -33,3 +33,9 @@ config AOC_CONTROL_DRIVER
 	default Y if AOC_DRIVER
 	help
 		Say yes here to add basic control for the AoC
+
+config AOC_TBN_DRIVER
+	tristate "WhiteChapel AoC TBN service"
+	default Y if AOC_DRIVER
+	help
+		Say yes here to add TBN service for the AoC
