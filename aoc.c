@@ -268,6 +268,7 @@ static unsigned long write_blocked_mask;
 static bool aoc_fpga_reset(struct aoc_prvdata *prvdata);
 static bool write_reset_trampoline(u32 addr);
 static bool aoc_a32_reset(void);
+static bool configure_sensor_regulator(struct aoc_prvdata *prvdata, bool enable);
 static int aoc_watchdog_restart(struct aoc_prvdata *prvdata);
 static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size);
 
@@ -1758,6 +1759,22 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_WO(reset);
 
+static ssize_t sensor_power_enable_store(struct device *dev,
+                                         struct device_attribute *attr,
+                                         const char *buf, size_t count)
+{
+	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
+	int val;
+
+	if (kstrtoint(buf, 10, &val) == 0) {
+		dev_info(prvdata->dev,"sensor_power_enable %d", val);
+		configure_sensor_regulator(prvdata, !!val);
+	}
+	return count;
+}
+
+static DEVICE_ATTR_WO(sensor_power_enable);
+
 static struct attribute *aoc_attrs[] = {
 	&dev_attr_firmware.attr,
 	&dev_attr_revision.attr,
@@ -1768,6 +1785,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_aoc_clock.attr,
 	&dev_attr_aoc_clock_and_kernel_boottime.attr,
 	&dev_attr_reset.attr,
+	&dev_attr_sensor_power_enable.attr,
 	NULL
 };
 

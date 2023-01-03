@@ -866,9 +866,9 @@ static int compr_offload_volume_set(struct snd_kcontrol *kcontrol,
 	chip->compr_offload_volume = ucontrol->value.integer.value[0];
 
 	/* temporary solution */
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_SPEAKER);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_USB);
-	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, SINK_BT);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_SPEAKER);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_USB);
+	aoc_audio_volume_set(chip, chip->compr_offload_volume, OFF_LOAD, ASNK_BT);
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
