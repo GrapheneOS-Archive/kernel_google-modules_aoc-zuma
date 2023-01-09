@@ -261,6 +261,7 @@ static const struct be_param_cache default_be_params[PORT_MAX] = {
 	MK_BE_PARAMS(INCALL_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 	MK_TDM_BE_PARAMS(HAPTIC_RX, SNDRV_PCM_FORMAT_S32_LE,
 			4, 48000, 4, SNDRV_PCM_FORMAT_S32_LE)
+	MK_BE_PARAMS(DP_DMA_RX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 };
 
 static struct snd_soc_dai_link_component null_component = {
@@ -952,6 +953,7 @@ MK_HW_PARAM_CTRLS(USB_TX, "USB_TX");
 MK_HW_PARAM_CTRLS(INCALL_RX, "INCALL_RX");
 MK_HW_PARAM_CTRLS(INCALL_TX, "INCALL_TX");
 MK_TDM_HW_PARAM_CTRLS(HAPTIC_RX, "HAPTIC_RX");
+MK_HW_PARAM_CTRLS(DP_DMA_RX, "DP_DMA_RX");
 
 /*
  * The resource array that have ALSA controls, ops and fixup
@@ -979,6 +981,7 @@ static const struct dai_link_res_map be_res_map[PORT_MAX] = {
 	MK_BE_RES_ITEM(INCALL_RX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(INCALL_TX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(HAPTIC_RX, &aoc_tdm_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(DP_DMA_RX, &aoc_i2s_ops, hw_params_fixup)
 };
 
 static void put_component(struct snd_soc_dai_link_component *component,
