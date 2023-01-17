@@ -245,6 +245,8 @@ struct aoc_chip {
 	int sidetone_enable;
 	int mic_loopback_enabled;
 	int gapless_offload_enable;
+	int chirp_enable;
+	int chirp_interval;
 	unsigned int opened;
 	unsigned int capture_param_set;
 	struct mutex audio_mutex;
@@ -411,6 +413,9 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 		   uint32_t count);
 int aoc_audio_volume_set(struct aoc_chip *chip, uint32_t volume,
 			 int src, int dst);
+
+int aoc_audio_chirp_enable(struct aoc_chip *chip, int enable);
+int aoc_audio_set_chirp_interval(struct aoc_chip *chip, int interval);
 
 int prepare_phonecall(struct aoc_alsa_stream *alsa_stream);
 int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);
