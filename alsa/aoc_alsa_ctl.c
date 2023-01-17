@@ -1652,6 +1652,66 @@ static int aoc_sink_channel_bitmap_ctl_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int aoc_audio_chirp_enable_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chirp_enable = ucontrol->value.integer.value[0];
+	err = aoc_audio_chirp_enable(chip, chip->chirp_enable);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int aoc_audio_chirp_enable_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chirp_enable;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_chirp_interval_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chirp_interval = ucontrol->value.integer.value[0];
+	err = aoc_audio_set_chirp_interval(chip, chip->chirp_interval);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int aoc_audio_chirp_interval_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chirp_interval;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 static int a2dp_encoder_parameters_put(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2115,6 +2175,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		.put = a2dp_encoder_parameters_put,
 		.count = 1,
 	},
+	SOC_SINGLE_EXT("AoC Chirp Enable", SND_SOC_NOPM, 0, 1, 0,
+		       aoc_audio_chirp_enable_get, aoc_audio_chirp_enable_set),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Interval", SND_SOC_NOPM,
+		0, 20, 200, 0, aoc_audio_chirp_interval_get, aoc_audio_chirp_interval_set, NULL),
 };
 
 int snd_aoc_new_ctl(struct aoc_chip *chip)
