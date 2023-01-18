@@ -2256,7 +2256,8 @@ struct CMD_AUDIO_INPUT_FEEDBACK_SRC_SELECT_REF {
 } __attribute__((packed));
 
 enum UDFPS_INPUT_SOURCE {
-  SOURCE_OSC = 0,
+  SOURCE_NONE = 0,
+  SOURCE_OSC,
   SOURCE_DISP,
   SOURCE_TOT,
 };

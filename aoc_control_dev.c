@@ -323,7 +323,7 @@ static ssize_t udfps_get_clock_frequency(uint8_t clk_src, struct device *dev, ch
 static ssize_t udfps_get_osc_freq_show(struct device *dev,
 				       struct device_attribute *attr, char *buf)
 {
-	return udfps_get_clock_frequency(0, dev, buf);
+	return udfps_get_clock_frequency(SOURCE_OSC, dev, buf);
 }
 
 static DEVICE_ATTR_RO(udfps_get_osc_freq);
@@ -331,7 +331,7 @@ static DEVICE_ATTR_RO(udfps_get_osc_freq);
 static ssize_t udfps_get_disp_freq_show(struct device *dev,
 					struct device_attribute *attr, char *buf)
 {
-	return udfps_get_clock_frequency(1, dev, buf);
+	return udfps_get_clock_frequency(SOURCE_DISP, dev, buf);
 }
 
 static DEVICE_ATTR_RO(udfps_get_disp_freq);
