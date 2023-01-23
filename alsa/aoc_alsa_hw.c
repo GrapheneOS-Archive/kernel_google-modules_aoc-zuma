@@ -24,8 +24,6 @@ static int cmd_count;
 #define DEFAULT_TELEPHONY_MIC PORT_INCALL_TX
 
 #define AOC_CHIRP_BLOCK 9
-#define AOC_CHIRP_INTERVAL_KEY 0
-#define AOC_CHIRP_ENABLE_KEY 1
 
 extern struct be_path_cache port_array[PORT_MAX];
 
@@ -3706,7 +3704,7 @@ int aoc_audio_us_record(struct aoc_chip *chip, bool enable)
 	return err;
 }
 
-int aoc_audio_chirp_enable(struct aoc_chip *chip, int enable)
+int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value)
 {
 	int err;
 	struct CMD_AUDIO_OUTPUT_SET_PARAMETER cmd;
@@ -3714,33 +3712,13 @@ int aoc_audio_chirp_enable(struct aoc_chip *chip, int enable)
 	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_OUTPUT_SET_PARAMETER_ID,
 		     sizeof(cmd));
 	cmd.block = AOC_CHIRP_BLOCK;
-	cmd.key = AOC_CHIRP_ENABLE_KEY;
-	cmd.val = enable;
+	cmd.key = key;
+	cmd.val = value;
 
 	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
 				sizeof(cmd), (uint8_t *)&cmd, chip);
 	if (err < 0)
-		pr_err("ERR:%d in AoC Chirp %s\n",
-		       err, (enable) ? "Enable" : "Disable");
-
-	return err < 0 ? err : 0;
-}
-
-int aoc_audio_set_chirp_interval(struct aoc_chip *chip, int interval)
-{
-	int err;
-	struct CMD_AUDIO_OUTPUT_SET_PARAMETER cmd;
-
-	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_OUTPUT_SET_PARAMETER_ID,
-		     sizeof(cmd));
-	cmd.block = AOC_CHIRP_BLOCK;
-	cmd.key = AOC_CHIRP_INTERVAL_KEY;
-	cmd.val = interval;
-
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), (uint8_t *)&cmd, chip);
-	if (err < 0)
-		pr_err("ERR:%d in AoC Set Chirp Interval\n", err);
+		pr_err("ERR:%d in AoC Set Chirp Parameter, key: %d\n", err, key);
 
 	return err < 0 ? err : 0;
 }
