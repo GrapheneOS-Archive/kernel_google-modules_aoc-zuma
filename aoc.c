@@ -151,7 +151,6 @@ static enum AOC_FW_STATE aoc_state;
 
 static struct platform_device *aoc_platform_device;
 
-
 struct mbox_slot {
 	struct mbox_client client;
 	struct mbox_chan *channel;
@@ -1017,6 +1016,8 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 	size_t msg_size;
 	int service_number;
 	int ret = 0;
+	bool was_full;
+	int interrupt = dev->mbox_index;
 
 	if (!dev || !buffer || !count)
 		return -EINVAL;
@@ -1088,9 +1089,17 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 	}
 
 	msg_size = count;
+	was_full = !aoc_service_can_write_message(service, AOC_UP);
+
 	aoc_service_read_message(service, prvdata->ipc_base, AOC_UP, buffer,
 				 &msg_size);
 
+	/*
+	 * If the service queue was full right before reading, signal AoC that
+	 * there is now space available to write.
+	 */
+	if (was_full)
+		signal_aoc(prvdata->mbox_channels[interrupt].channel);
 err:
 	atomic_dec(&prvdata->aoc_process_active);
 	if (ret < 0)
