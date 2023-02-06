@@ -133,7 +133,7 @@ static struct snd_pcm_hardware snd_aoc_playback_hw = {
 	.channels_max = 4,
 	.buffer_bytes_max = 16384 * 6,
 	.period_bytes_min = 16,
-	.period_bytes_max = 7680,
+	.period_bytes_max = 11520,
 	.periods_min = 2,
 	.periods_max = 1024 * 6,
 };
