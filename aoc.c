@@ -1029,18 +1029,30 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
+	if (!prvdata)
+		return -ENODEV;
+
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+		ret = -EBUSY;
+		goto err;
+	}
 
 	service_number = dev->service_index;
 	service = service_at_index(prvdata, dev->service_index);
 
 	BUG_ON(!aoc_is_valid_dram_address(prvdata, service));
 
-	if (aoc_service_message_slots(service, AOC_UP) == 0)
-		return -EBADF;
+	if (aoc_service_message_slots(service, AOC_UP) == 0) {
+		ret = -EBADF;
+		goto err;
+	}
 
 	if (!aoc_service_can_read_message(service, AOC_UP)) {
-		if (!block)
-			return -EAGAIN;
+		if (!block) {
+			ret = -EAGAIN;
+			goto err;
+		}
 
 		set_bit(service_number, &read_blocked_mask);
 		ret = wait_event_interruptible(dev->read_queue,
@@ -1049,27 +1061,40 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 		clear_bit(service_number, &read_blocked_mask);
 	}
 
-	if (dev->dead)
-		return -ENODEV;
+	if (dev->dead) {
+		ret = -ENODEV;
+		goto err;
+	}
 
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -ENODEV;
+	if (aoc_state != AOC_STATE_ONLINE) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	/*
 	 * The wait can fail if the AoC goes offline in the middle of a
 	 * blocking read, so check again after the wait
 	 */
-	if (ret != 0)
-		return -EAGAIN;
+	if (ret != 0) {
+		ret = -EAGAIN;
+		goto err;
+	}
 
 	if (!aoc_service_is_ring(service) &&
 	    count < aoc_service_current_message_size(service, prvdata->ipc_base,
-						     AOC_UP))
-		return -EFBIG;
+						     AOC_UP)) {
+		ret = -EFBIG;
+		goto err;
+	}
 
 	msg_size = count;
 	aoc_service_read_message(service, prvdata->ipc_base, AOC_UP, buffer,
 				 &msg_size);
+
+err:
+	atomic_dec(&prvdata->aoc_process_active);
+	if (ret < 0)
+		return ret;
 
 	return msg_size;
 }
@@ -1190,21 +1215,35 @@ ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 
 	parent = dev->dev.parent;
 	prvdata = dev_get_drvdata(parent);
+	if (!prvdata)
+		return -ENODEV;
+
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+		ret = -EBUSY;
+		goto err;
+	}
 
 	service_number = dev->service_index;
 	service = service_at_index(prvdata, service_number);
 
 	BUG_ON(!aoc_is_valid_dram_address(prvdata, service));
 
-	if (aoc_service_message_slots(service, AOC_DOWN) == 0)
-		return -EBADF;
+	if (aoc_service_message_slots(service, AOC_DOWN) == 0) {
+		ret = -EBADF;
+		goto err;
+	}
 
-	if (count > aoc_service_message_size(service, AOC_DOWN))
-		return -EFBIG;
+	if (count > aoc_service_message_size(service, AOC_DOWN)) {
+		ret = -EFBIG;
+		goto err;
+	}
 
 	if (!aoc_service_can_write_message(service, AOC_DOWN)) {
-		if (!block)
-			return -EAGAIN;
+		if (!block) {
+			ret = -EAGAIN;
+			goto err;
+		}
 
 		set_bit(service_number, &write_blocked_mask);
 		ret = wait_event_interruptible(dev->write_queue,
@@ -1213,24 +1252,34 @@ ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 		clear_bit(service_number, &write_blocked_mask);
 	}
 
-	if (dev->dead)
-		return -ENODEV;
+	if (dev->dead) {
+		ret = -ENODEV;
+		goto err;
+	}
 
-	if (aoc_state != AOC_STATE_ONLINE)
-		return -ENODEV;
+	if (aoc_state != AOC_STATE_ONLINE) {
+		ret = -ENODEV;
+		goto err;
+	}
 
 	/*
 	 * The wait can fail if the AoC goes offline in the middle of a
 	 * blocking write, so check again after the wait
 	 */
-	if (ret != 0)
-		return -EAGAIN;
+	if (ret != 0) {
+		ret = -EAGAIN;
+		goto err;
+	}
 
 	ret = aoc_service_write_message(service, prvdata->ipc_base, AOC_DOWN,
 					buffer, count);
 
 	if (!aoc_service_is_ring(service) || aoc_ring_is_push(service))
 		signal_aoc(prvdata->mbox_channels[interrupt].channel);
+err:
+	atomic_dec(&prvdata->aoc_process_active);
+	if (ret < 0)
+		return ret;
 
 	return count;
 }
@@ -1965,7 +2014,7 @@ static void aoc_configure_interrupt(void)
 	aoc_clear_gpio_interrupt();
 }
 
-static int aoc_remove_device(struct device *dev, void *ctx)
+static int aoc_wakeup_queues(struct device *dev, void *ctx)
 {
 	struct aoc_service_dev *the_dev = AOC_DEVICE(dev);
 
@@ -1979,8 +2028,12 @@ static int aoc_remove_device(struct device *dev, void *ctx)
 	wake_up(&the_dev->read_queue);
 	wake_up(&the_dev->write_queue);
 
-	device_unregister(dev);
+	return 0;
+}
 
+static int aoc_remove_device(struct device *dev, void *ctx)
+{
+	device_unregister(dev);
 	return 0;
 }
 
@@ -2397,7 +2450,9 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		aoc_state = AOC_STATE_OFFLINE;
 
 		/* wait until aoc_process or service write/read finish */
-		while (!!atomic_read(&prvdata->aoc_process_active));
+		while (!!atomic_read(&prvdata->aoc_process_active)) {
+			bus_for_each_dev(&aoc_bus_type, NULL, NULL, aoc_wakeup_queues);
+		}
 
 		bus_for_each_dev(&aoc_bus_type, NULL, NULL, aoc_remove_device);
 
