@@ -3402,6 +3402,7 @@ static void aoc_platform_shutdown(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(pdev);
 
+	disable_irq_nosync(prvdata->watchdog_irq);
 	aoc_take_offline(prvdata);
 }
 
