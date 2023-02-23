@@ -80,7 +80,7 @@
 #define AOC_S2MPU_CTRL0 0x0
 
 #define AOC_MAX_MINOR (1U)
-#define AOC_MBOX_CHANNELS (16 * 2) /* AP<->A32 and AP<->F1 mboxes */
+#define AOC_MBOX_CHANNELS 16
 
 #define AOC_FWDATA_ENTRIES 10
 #define AOC_FWDATA_BOARDID_DFL  0x20202
