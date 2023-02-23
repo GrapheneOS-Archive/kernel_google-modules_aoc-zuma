@@ -80,7 +80,11 @@
 #define AOC_S2MPU_CTRL0 0x0
 
 #define AOC_MAX_MINOR (1U)
-#define AOC_MBOX_CHANNELS 16
+#if IS_ENABLED(CONFIG_SOC_GS101)
+	#define AOC_MBOX_CHANNELS 16 /* AP-A32 mbox */
+#else
+	#define AOC_MBOX_CHANNELS (16 * 2) /* AP-A32 and AP-F1 mbox */
+#endif
 
 #define AOC_FWDATA_ENTRIES 10
 #define AOC_FWDATA_BOARDID_DFL  0x20202
