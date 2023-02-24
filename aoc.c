@@ -1035,6 +1035,22 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 }
 EXPORT_SYMBOL_GPL(aoc_service_read);
 
+
+bool aoc_online_state(struct aoc_service_dev *dev) {
+	struct aoc_prvdata *prvdata;
+	if (!dev)
+		return false;
+
+	prvdata = dev_get_drvdata(dev->dev.parent);
+	if (!prvdata)
+		return false;
+
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+		return false;
+	return true;
+}
+EXPORT_SYMBOL_GPL(aoc_online_state);
+
 ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 				 size_t count, long timeout)
 {

@@ -2688,6 +2688,10 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 		}
 	}
 
+	/* If AoC is not ready, force read data to zero */
+	if (!aoc_online_state(dev))
+		memset(tmp, 0, count);
+
 	err = copy_to_user(dest, tmp, count);
 	if (err != 0) {
 		pr_err("ERR: %d bytes not copied to user space\n", err);
