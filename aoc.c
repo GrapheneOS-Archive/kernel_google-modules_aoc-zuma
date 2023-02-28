@@ -94,7 +94,11 @@
 #define AOC_S2MPU_CTRL_PROTECTION_ENABLE_VID_MASK_ALL 0xFF
 
 #define AOC_MAX_MINOR (1U)
-#define AOC_MBOX_CHANNELS (16 * 2) /* AP<->A32 and AP<->F1 mboxes */
+#if IS_ENABLED(CONFIG_SOC_GS101)
+	#define AOC_MBOX_CHANNELS 16
+#else
+	#define AOC_MBOX_CHANNELS (16 * 3) /* AP<->A32, AP<->F1, AP<->P6 mboxes */
+#endif
 
 #define AOC_FWDATA_ENTRIES 10
 #define AOC_FWDATA_BOARDID_DFL  0x20202
