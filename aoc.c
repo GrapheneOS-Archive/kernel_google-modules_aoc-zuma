@@ -83,7 +83,7 @@
 #if IS_ENABLED(CONFIG_SOC_GS101)
 	#define AOC_MBOX_CHANNELS 16 /* AP-A32 mbox */
 #else
-	#define AOC_MBOX_CHANNELS (16 * 2) /* AP-A32 and AP-F1 mbox */
+	#define AOC_MBOX_CHANNELS (16 * 3) /* AP-A32, AP-F1 and AP-P6 mbox */
 #endif
 
 #define AOC_FWDATA_ENTRIES 10
