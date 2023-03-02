@@ -85,6 +85,9 @@ void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
 void aoc_remove_map_handler(struct aoc_service_dev *dev);
 void aoc_trigger_watchdog(const char *reason);
 
+extern u32 gs_chipid_get_revision(void);
+extern u32 gs_chipid_get_type(void);
+
 #define AOC_SERVICE_NAME_LENGTH 32
 
 /* Rings should have the ring flag set, slots = 1, size = ring size
@@ -146,6 +149,8 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCCaptureHeapSize = 0x100F,
 	kAOCForceSpeakerUltrasonic = 0x1010,
 	kAOCRandSeed = 0x1011,
+	kAOCChipRevision = 0x1012,
+	kAOCChipType =  0x1013,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \

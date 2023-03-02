@@ -774,6 +774,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	u32 rand_seed = get_random_u32();
+	u32 chip_revision = gs_chipid_get_revision();
+	u32 chip_type = gs_chipid_get_type();
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
@@ -797,7 +799,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCDisableMM, .value = disable_mm },
 		{ .key = kAOCEnableUART, .value = enable_uart },
 		{ .key = kAOCForceSpeakerUltrasonic, .value = force_speaker_ultrasonic },
-		{ .key = kAOCRandSeed, .value = rand_seed }
+		{ .key = kAOCRandSeed, .value = rand_seed },
+		{ .key = kAOCChipRevision, .value = chip_revision },
+		{ .key = kAOCChipType, .value = chip_type }
 	};
 
 	const char *version;
