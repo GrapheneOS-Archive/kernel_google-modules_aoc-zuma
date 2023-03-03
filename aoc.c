@@ -198,6 +198,7 @@ struct aoc_prvdata {
 	struct work_struct watchdog_work;
 	bool aoc_reset_done;
 	bool ap_triggered_reset;
+	bool force_release_aoc;
 	char ap_reset_reason[AP_RESET_REASON_LENGTH];
 	wait_queue_head_t aoc_reset_wait_queue;
 	unsigned int acpm_async_id;
@@ -810,6 +811,11 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		return;
 	}
 
+	if (prvdata->force_release_aoc) {
+		dev_info(dev, "Force Reload Trigger: Free current loaded\n");
+		goto free_fw;
+	}
+
 	for (i = 0; i < fw_data_entries; i++) {
 		if (fw_data[i].key == kAOCBoardID)
 			fw_data[i].value = board_id;
@@ -915,7 +921,12 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	dev_info(dev, "re-enabling SICD\n");
 	enable_power_mode(0, POWERMODE_TYPE_SYSTEM);
 
+	release_firmware(fw);
+	return;
+
 free_fw:
+	/* Change aoc_state to offline due to abnormal firmware */
+	aoc_state = AOC_STATE_OFFLINE;
 	release_firmware(fw);
 }
 
@@ -1879,6 +1890,29 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_WO(reset);
 
+static ssize_t force_reload_store(struct device *dev, struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
+
+	/* Force release current loaded AoC if watchdog already active */
+	prvdata->force_release_aoc = true;
+	while (work_busy(&prvdata->watchdog_work) || work_busy(&prvdata->monitor_work.work));
+	prvdata->force_release_aoc = false;
+
+	/* Disable IRQ if AoC is loaded for paired IRQ */
+	if (aoc_state != AOC_STATE_OFFLINE)
+		disable_irq_nosync(prvdata->watchdog_irq);
+
+	strlcpy(prvdata->ap_reset_reason, "Force Reload AoC", AP_RESET_REASON_LENGTH);
+	prvdata->ap_triggered_reset = true;
+
+	schedule_work(&prvdata->watchdog_work);
+
+	return count;
+}
+static DEVICE_ATTR_WO(force_reload);
+
 static ssize_t sensor_power_enable_store(struct device *dev,
                                          struct device_attribute *attr,
                                          const char *buf, size_t count)
@@ -1906,6 +1940,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_aoc_clock_and_kernel_boottime.attr,
 	&dev_attr_reset.attr,
 	&dev_attr_sensor_power_enable.attr,
+	&dev_attr_force_reload.attr,
 	NULL
 };
 
@@ -2276,34 +2311,19 @@ static void aoc_monitor_online(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
 		container_of(work, struct aoc_prvdata, monitor_work.work);
-	int restart_rc;
 
-
-	mutex_lock(&aoc_service_lock);
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
 
 #if IS_ENABLED(CONFIG_SOC_GS201)
 		/* TODO: Causing APC watchdogs on GS201 */
-		mutex_unlock(&aoc_service_lock);
 		return;
 #endif
-
 		disable_irq_nosync(prvdata->watchdog_irq);
-		aoc_take_offline(prvdata);
-		restart_rc = aoc_watchdog_restart(prvdata);
-		if (restart_rc == AOC_RESTART_DISABLED_RC) {
-			dev_info(prvdata->dev,
-				"aoc restart is disabled\n");
-		} else if (restart_rc) {
-			dev_info(prvdata->dev,
-				"aoc restart failed: rc = %d\n", restart_rc);
-		} else {
-			dev_info(prvdata->dev,
-				"aoc restart succeeded\n");
-		}
+		strlcpy(prvdata->ap_reset_reason, "Monitor Reset", AP_RESET_REASON_LENGTH);
+		prvdata->ap_triggered_reset = true;
+		schedule_work(&prvdata->watchdog_work);
 	}
-	mutex_unlock(&aoc_service_lock);
 }
 
 static void aoc_did_become_online(struct work_struct *work)
