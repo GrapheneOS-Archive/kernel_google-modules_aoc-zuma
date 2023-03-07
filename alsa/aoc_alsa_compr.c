@@ -99,22 +99,13 @@ void aoc_compr_offload_isr(struct aoc_service_dev *dev)
 		if (!aoc_ring_flush_read_data(alsa_stream->dev_eof->service, AOC_UP, 0))
 			pr_err("ERR: decoder_eof ring buffer flush fail\n");
 
-		/*
-		 * When enabling gapless offload, AOC might early send EOF
-		 */
-		if (alsa_stream->gapless_offload_enable) {
-			pr_info("compress offload gapless ring buffer is depleted\n");
+		if (alsa_stream->draining == 1) {
+			pr_info("compress offload ring buffer is depleted\n");
 			snd_compr_drain_notify(alsa_stream->cstream);
 			alsa_stream->eof_reach = 1;
+			alsa_stream->draining = 0;
 			return;
 		}
-	}
-
-	if (aoc_ring_bytes_available_to_read(dev->service, AOC_DOWN) == 0) {
-		pr_info("compress offload ring buffer is depleted\n");
-		snd_compr_drain_notify(alsa_stream->cstream);
-		alsa_stream->eof_reach = 1;
-		return;
 	}
 
 	consumed = aoc_ring_bytes_read(dev->service, AOC_DOWN);
@@ -358,7 +349,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	chip->alsa_stream[idx] = alsa_stream;
 	chip->opened |= (1 << idx);
 	alsa_stream->open = 1;
-	alsa_stream->draining = 1;
+	alsa_stream->draining = 0; // set to 1 when partial drain
 
 	alsa_stream->timer_interval_ns = COMPR_OFFLOAD_TIMER_INTERVAL_NANOSECS;
 	hrtimer_init(&(alsa_stream->hr_timer), CLOCK_MONOTONIC,
@@ -523,11 +514,13 @@ static int aoc_compr_trigger(struct snd_soc_component *component, struct snd_com
 
 	case SND_COMPR_TRIGGER_DRAIN:
 		pr_debug("%s: SNDRV_PCM_TRIGGER_DRAIN\n", __func__);
+		alsa_stream->draining = 1;
 		break;
 
 	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
 		pr_debug("%s: SNDRV_PCM_TRIGGER_PARTIAL_DRAIN\n", __func__);
 		aoc_compr_offload_partial_drain(alsa_stream);
+		alsa_stream->draining = 1;
 		break;
 
 	case SND_COMPR_TRIGGER_NEXT_TRACK:
