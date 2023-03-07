@@ -463,8 +463,7 @@ static void aoc_control_complete(struct device *dev)
 	AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
 	cmd.transition = 1;
 
-	ret = read_attribute(prvdata, &cmd, sizeof(cmd),
-				&cmd, sizeof(cmd));
+	ret = write_attribute(prvdata, &cmd, sizeof(cmd));
 
 	if (ret < 0)
 		dev_err(dev, "notifying AoC of exiting deep sleep ret = %d\n", ret);
