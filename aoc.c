@@ -115,6 +115,10 @@
 
 #define MAX_SENSOR_POWER_NUM 5
 
+#define RESET_WAIT_TIMES_NUM 3
+#define RESET_WAIT_TIME_MS 3000
+#define RESET_WAIT_TIME_INCREMENT_MS  2048
+
 static DEFINE_MUTEX(aoc_service_lock);
 
 enum AOC_FW_STATE {
@@ -203,6 +207,10 @@ struct aoc_prvdata {
 	int sensor_power_count;
 	const char *sensor_power_list[MAX_SENSOR_POWER_NUM];
 	struct regulator *sensor_regulator[MAX_SENSOR_POWER_NUM];
+
+	int reset_hysteresis_trigger_ms;
+	u64 last_reset_time_ns;
+	int reset_wait_time_index;
 };
 
 /* TODO: Reduce the global variables (move into a driver structure) */
@@ -2554,6 +2562,26 @@ static void aoc_watchdog(struct work_struct *work)
 
 	prvdata->total_restarts++;
 
+	if (prvdata->ap_triggered_reset) {
+		if ((ktime_get_real_ns() - prvdata->last_reset_time_ns) / 1000000
+			<= prvdata->reset_hysteresis_trigger_ms) {
+			/* If the watchdog was triggered recently, busy wait to
+			 * avoid overlapping resets.
+			 */
+			dev_err(prvdata->dev, "Triggered hysteresis for AP reset, waiting %d ms",
+				RESET_WAIT_TIME_MS +
+				prvdata->reset_wait_time_index * RESET_WAIT_TIME_INCREMENT_MS);
+			msleep(RESET_WAIT_TIME_MS +
+				prvdata->reset_wait_time_index * RESET_WAIT_TIME_INCREMENT_MS);
+			if (prvdata->reset_wait_time_index < RESET_WAIT_TIMES_NUM)
+				prvdata->reset_wait_time_index++;
+		} else {
+			prvdata->reset_wait_time_index = 0;
+		}
+	}
+
+	prvdata->last_reset_time_ns = ktime_get_real_ns();
+
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
 
@@ -3123,6 +3151,9 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->enable_uart_tx = 0;
 	prvdata->force_voltage_nominal = 0;
 	prvdata->no_ap_resets = 0;
+	prvdata->reset_hysteresis_trigger_ms = 10000;
+	prvdata->last_reset_time_ns = ktime_get_real_ns();
+	prvdata->reset_wait_time_index = 0;
 
 	rc = find_gsa_device(prvdata);
 	if (rc) {
