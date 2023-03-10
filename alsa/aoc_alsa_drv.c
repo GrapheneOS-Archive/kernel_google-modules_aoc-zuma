@@ -304,6 +304,12 @@ static int snd_aoc_alsa_probe(void)
 		goto out;
 	}
 
+	err = aoc_usb_init();
+	if (err) {
+		pr_err("ERR: fail to init aoc usb driver\n");
+		goto out;
+	}
+
 	return 0;
 
 out:

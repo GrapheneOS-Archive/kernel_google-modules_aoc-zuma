@@ -1531,6 +1531,18 @@ static int usb_cfg_v2_ctl_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	case USB_CFG_TO_AOC:
 		val = 0;
 		break;
+	case USB_CARD:
+		val = chip->usb_card;
+		break;
+	case USB_DEVICE:
+		val = chip->usb_device;
+		break;
+	case USB_DIRECTION:
+		val = chip->usb_direction;
+		break;
+	case USB_MEM_CFG:
+		val = 0;
+		break;
 	default:
 		val = -1;
 		pr_err("ERR: incorrect index for USB config v2 in %s\n", __func__);
@@ -1594,6 +1606,18 @@ static int usb_cfg_v2_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 		err = aoc_set_usb_config_v2(chip);
 		if (err < 0)
 			pr_err("ERR:%d fail to update aoc usb config v2!\n", err);
+		break;
+	case USB_CARD:
+		chip->usb_card = val;
+		break;
+	case USB_DEVICE:
+		chip->usb_device = val;
+		break;
+	case USB_DIRECTION:
+		chip->usb_direction = val;
+		break;
+	case USB_MEM_CFG:
+		aoc_set_usb_mem_config(chip);
 		break;
 	default:
 		err = -EINVAL;
@@ -2014,6 +2038,14 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("USB Capture BW v2", SND_SOC_NOPM, USB_RX_BW, 32, 0,
 		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
 	SOC_SINGLE_EXT("USB Config To AoC v2", SND_SOC_NOPM, USB_CFG_TO_AOC, 1, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Card", SND_SOC_NOPM, USB_CARD, 7, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Device", SND_SOC_NOPM, USB_DEVICE, 31, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Direction", SND_SOC_NOPM, USB_DIRECTION, 1, 0,
+		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
+	SOC_SINGLE_EXT("USB Memory Config", SND_SOC_NOPM, USB_MEM_CFG, 1, 0,
 		       usb_cfg_v2_ctl_get, usb_cfg_v2_ctl_set),
 
 	SOC_ENUM_EXT("Audio Sink 0 Processing State", sink_0_state_enum,
