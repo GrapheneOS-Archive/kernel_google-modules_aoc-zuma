@@ -69,6 +69,10 @@ struct get_isoc_tr_info_args {
 int register_aoc_usb_notifier(struct notifier_block *nb);
 int unregister_aoc_usb_notifier(struct notifier_block *nb);
 
+extern bool aoc_alsa_usb_callback_register(void (*callback)(struct usb_device*,
+							    struct usb_host_endpoint*));
+extern bool aoc_alsa_usb_callback_unregister(void);
+
 int notify_offload_state(bool enabled);
 int xhci_set_dcbaa_ptr(u64 aoc_dcbaa_ptr);
 int xhci_setup_done(void);

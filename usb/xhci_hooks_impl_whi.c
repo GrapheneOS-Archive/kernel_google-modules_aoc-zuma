@@ -26,6 +26,32 @@ struct xhci_offload_data *xhci_get_offload_data(void)
 	return offload_data;
 }
 
+static struct xhci_hcd *get_xhci_hcd_by_udev(struct usb_device *udev)
+{
+	struct usb_hcd *uhcd = container_of(udev->bus, struct usb_hcd, self);
+
+	return hcd_to_xhci(uhcd);
+}
+
+static u32 xhci_get_endpoint_type(struct usb_host_endpoint *ep)
+{
+	int in;
+
+	in = usb_endpoint_dir_in(&ep->desc);
+
+	switch (usb_endpoint_type(&ep->desc)) {
+	case USB_ENDPOINT_XFER_CONTROL:
+		return CTRL_EP;
+	case USB_ENDPOINT_XFER_BULK:
+		return in ? BULK_IN_EP : BULK_OUT_EP;
+	case USB_ENDPOINT_XFER_ISOC:
+		return in ? ISOC_IN_EP : ISOC_OUT_EP;
+	case USB_ENDPOINT_XFER_INT:
+		return in ? INT_IN_EP : INT_OUT_EP;
+	}
+	return 0;
+}
+
 /*
  * Determine if an USB device is a compatible devices:
  *     True: Devices are audio class and they contain ISOC endpoint
@@ -66,6 +92,35 @@ static bool is_compatible_with_usb_audio_offload(struct usb_device *udev)
 
 out:
 	return is_audio;
+}
+
+static void setup_transfer_ring(struct usb_device *udev, struct usb_host_endpoint *ep)
+{
+	struct xhci_hcd *xhci = get_xhci_hcd_by_udev(udev);
+	struct xhci_virt_device *virt_dev;
+	unsigned int ep_index;
+	u32 endpoint_type;
+	u16 dir;
+
+	ep_index = xhci_get_endpoint_index(&ep->desc);
+	endpoint_type = xhci_get_endpoint_type(ep);
+	dir = endpoint_type == ISOC_IN_EP ? 0 : 1;
+
+	virt_dev = xhci->devs[udev->slot_id];
+	if (!virt_dev) {
+		xhci_err(xhci, "%s: virt_dev not found!\n", __func__);
+		return;
+	}
+
+	if (virt_dev->eps[ep_index].new_ring) {
+		xhci_info(xhci, "%s: deliver transfer ring from new_ring\n", __func__);
+		xhci_set_isoc_tr_info(0, dir, virt_dev->eps[ep_index].new_ring);
+	} else if (virt_dev->eps[ep_index].ring) {
+		xhci_info(xhci, "%s: deliver transfer ring from ring\n", __func__);
+		xhci_set_isoc_tr_info(0, dir, virt_dev->eps[ep_index].ring);
+	} else {
+		xhci_err(xhci, "%s: transfer ring not found!\n", __func__);
+	}
 }
 
 static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
@@ -132,6 +187,7 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 
 	offload_data->offload_state = true;
 
+	aoc_alsa_usb_callback_register(setup_transfer_ring);
 	usb_register_notify(&xhci_udev_nb);
 	offload_data->op_mode = USB_OFFLOAD_DRAM;
 	offload_data->xhci = xhci;
@@ -156,6 +212,7 @@ static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 	offload_data->op_mode = USB_OFFLOAD_STOP;
 	offload_data->xhci = NULL;
 
+	aoc_alsa_usb_callback_unregister();
 	usb_unregister_notify(&xhci_udev_nb);
 
 	/* Notification for xhci driver removing */
