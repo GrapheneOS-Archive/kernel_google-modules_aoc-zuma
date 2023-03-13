@@ -2249,6 +2249,33 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		0, 0, 10, 0, aoc_audio_chirp_mode_get, aoc_audio_chirp_mode_set, NULL),
 };
 
+int snd_aoc_pdm_state(void *priv, int index)
+{
+	int i;
+	struct aoc_chip *chip = priv;
+	int pdm_result = BIT(index);
+	bool checked = false;
+	int silence_deteced = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	for (i = 0; i < NUM_OF_MIC_BROKEN_RECORD; i++) {
+		/* Return detected if all valid check result are positive */
+		if (chip->buildin_mic_broken_detect[i] >= 0) {
+			checked = true;
+			pdm_result &= chip->buildin_mic_broken_detect[i];
+		}
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+
+	if (pdm_result && checked)
+		silence_deteced = 1;
+
+	return silence_deteced;
+}
+
 int snd_aoc_new_ctl(struct aoc_chip *chip)
 {
 	int err;
@@ -2260,6 +2287,8 @@ int snd_aoc_new_ctl(struct aoc_chip *chip)
 		if (err < 0)
 			return err;
 	}
+
+	pdm_callback_register(snd_aoc_pdm_state, NUM_OF_BUILTIN_MIC, chip);
 
 	return 0;
 }

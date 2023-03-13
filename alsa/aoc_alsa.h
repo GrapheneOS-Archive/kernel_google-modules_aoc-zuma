@@ -32,6 +32,7 @@
 #include "../aoc-interface.h"
 #include "google-aoc-enum.h"
 #include "usbaudio.h"
+#include "audiometrics.h"
 
 #define ALSA_AOC_CMD "alsa-aoc"
 #define CMD_INPUT_CHANNEL "audio_input_control"
@@ -336,6 +337,8 @@ void aoc_pcm_period_work_handler(struct work_struct *work);
 
 int snd_aoc_new_ctl(struct aoc_chip *chip);
 int snd_aoc_new_pcm(struct aoc_chip *chip);
+
+int snd_aoc_pdm_state(void* priv, int index);
 
 int aoc_audio_setup(struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_open(struct aoc_alsa_stream *alsa_stream);

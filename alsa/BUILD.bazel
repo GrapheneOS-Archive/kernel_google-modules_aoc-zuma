@@ -10,8 +10,9 @@ kernel_module(
         "Kbuild",
         "Makefile",
     ]) + [
-        "//private/google-modules/aoc_ipc:headers",
+        "//private/google-modules/amplifiers/audiometrics:headers",
         "//private/google-modules/aoc:headers",
+        "//private/google-modules/aoc_ipc:headers",
         "//private/google-modules/soc/gs:gs_soc_headers",
     ],
     outs = [
@@ -25,6 +26,7 @@ kernel_module(
         "//private/google-modules/soc/gs:__pkg__",
     ],
     deps = [
+        "//private/google-modules/amplifiers/audiometrics",
         "//private/google-modules/aoc",
         "//private/google-modules/soc/gs:gs_soc_module",
     ],

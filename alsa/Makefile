@@ -8,7 +8,9 @@ KBUILD_OPTIONS	+= CONFIG_AOC_DRIVER=m
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-modules/aoc_ipc
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-modules/aoc
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/sound/usb
+EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../private/google-modules/amplifiers/audiometrics
 EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/aoc/Module.symvers
+EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/amplifiers/audiometrics/Module.symvers
 
 include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
 
