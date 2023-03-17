@@ -2231,7 +2231,7 @@ static const struct snd_soc_dapm_route aoc_routes[] = {
 };
 
 static int aoc_of_xlate_dai_name(struct snd_soc_component *component,
-				 const struct of_phandle_args *args,
+				 struct of_phandle_args *args,
 				 const char **dai_name)
 {
 	int i, ret = -EINVAL, head, next;
