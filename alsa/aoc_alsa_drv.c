@@ -192,6 +192,9 @@ int free_aoc_audio_service(const char *name, struct aoc_service_dev *dev)
 		goto done;
 	}
 
+	if (service_lists[i].dev)
+		service_lists[i].dev->prvdata = NULL;
+
 	service_lists[i].ref--;
 	service_lists[i].event_callback = NULL;
 	service_lists[i].prvdata = NULL;

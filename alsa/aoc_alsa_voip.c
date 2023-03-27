@@ -253,7 +253,6 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 	if (err < 0)
 		pr_err("ERR: fail in voip call tearing down\n");
 
-	alsa_stream->dev->prvdata = NULL;
 	runtime = substream->runtime;
 	alsa_stream = runtime->private_data;
 
