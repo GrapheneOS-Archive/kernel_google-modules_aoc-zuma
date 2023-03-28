@@ -2496,8 +2496,6 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 	}
 
-// TODO(b/238553915): [Zuma] Enable GSA boot
-#if !IS_ENABLED(CONFIG_SOC_ZUMA)
 	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
 	 * as 2.  Change this when the header is updated
 	 */
@@ -2505,7 +2503,6 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
 	if (rc)
 		dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
-#endif
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
