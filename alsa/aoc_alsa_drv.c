@@ -82,7 +82,7 @@ static bool pcm_support_interrupt(uint8_t mbox_index)
 
 static bool incall_hifi_support_interrupt(uint8_t mbox_index)
 {
-	return (mbox_index == INCALL_HIFI_CHANNEL) ? true : false;
+	return (mbox_index == INCALL_CHANNEL || mbox_index == HIFI_CHANNEL) ? true : false;
 }
 
 static bool voip_support_interrupt(uint8_t mbox_index)

@@ -40,7 +40,7 @@ static struct snd_pcm_hardware snd_aoc_playback_hw = {
 
 static bool aoc_incall_hifi_support_interrupt(uint8_t mbox_index)
 {
-	return (mbox_index == INCALL_HIFI_CHANNEL);
+	return (mbox_index == INCALL_CHANNEL || mbox_index == HIFI_CHANNEL);
 }
 
 static enum hrtimer_restart aoc_incall_hifi_irq_process(struct aoc_alsa_stream *alsa_stream)
