@@ -198,6 +198,7 @@ struct aoc_prvdata {
 	struct notifier_block itmon_nb;
 #endif
 	struct device *gsa_dev;
+	bool protected_by_gsa;
 
 	int sensor_power_count;
 	const char *sensor_power_list[MAX_SENSOR_POWER_NUM];
@@ -820,6 +821,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	}
 
 	fw_signed = _aoc_fw_is_signed(fw);
+	prvdata->protected_by_gsa = fw_signed;
 
 	dev_info(dev, "Loading %s aoc image\n", fw_signed ? "signed" : "unsigned");
 
@@ -2359,13 +2361,28 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 	}
 
-	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
-	 * as 2.  Change this when the header is updated
-	 */
-	gsa_send_aoc_cmd(prvdata->gsa_dev, 4);
-	rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
-	if (rc)
-		dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+	if(prvdata->protected_by_gsa) {
+		/* TODO(b/275463650): GSA_AOC_SHUTDOWN needs to be 4, but the current
+		 * header defines as 2.  Change this to enum when the header is updated.
+		 */
+		rc = gsa_send_aoc_cmd(prvdata->gsa_dev, 4);
+		/* rc is the new state of AOC unless it's negative,
+		 * in which case it's an error code
+		 */
+		if(rc != GSA_AOC_STATE_LOADED) {
+			if(rc >= 0) {
+				dev_err(prvdata->dev,
+					"GSA shutdown command returned unexpected state: %d\n", rc);
+			} else {
+				dev_err(prvdata->dev,
+					"GSA shutdown command returned error: %d\n", rc);
+			}
+		}
+
+		rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
+		if (rc)
+			dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+	}
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
