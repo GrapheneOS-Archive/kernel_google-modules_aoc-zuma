@@ -440,33 +440,39 @@ static ssize_t read_stat_by_name(struct device *dev, char *buf,
 
 static int aoc_control_prepare(struct device *dev)
 {
-	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
-	struct CMD_AP_STATE_TRANSITION cmd;
-	int ret;
+	#if ! IS_ENABLED(CONFIG_SOC_GS101)
+		struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+		struct CMD_AP_STATE_TRANSITION cmd;
+		int ret;
 
-	AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
-	cmd.transition = 0;
+		AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
+		cmd.transition = 0;
 
-	ret = write_attribute(prvdata, &cmd, sizeof(cmd));
-	if (ret < 0)
-		dev_err(dev, "notifying AoC of entering deep sleep ret = %d\n", ret);
+		ret = write_attribute(prvdata, &cmd, sizeof(cmd));
+		if (ret < 0)
+			dev_err(dev, "notifying AoC of entering deep sleep ret = %d\n", ret);
 
-	return ret;
+		return ret;
+	#else
+		return 0;
+	#endif
 }
 
 static void aoc_control_complete(struct device *dev)
 {
-	struct stats_prvdata *prvdata = dev_get_drvdata(dev);
-	struct CMD_AP_STATE_TRANSITION cmd;
-	int ret;
+	#if ! IS_ENABLED(CONFIG_SOC_GS101)
+		struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+		struct CMD_AP_STATE_TRANSITION cmd;
+		int ret;
 
-	AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
-	cmd.transition = 1;
+		AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
+		cmd.transition = 1;
 
-	ret = write_attribute(prvdata, &cmd, sizeof(cmd));
+		ret = write_attribute(prvdata, &cmd, sizeof(cmd));
 
-	if (ret < 0)
-		dev_err(dev, "notifying AoC of exiting deep sleep ret = %d\n", ret);
+		if (ret < 0)
+			dev_err(dev, "notifying AoC of exiting deep sleep ret = %d\n", ret);
+	#endif
 }
 
 #define DECLARE_STAT(stat_name, sysfs_name)                                    \

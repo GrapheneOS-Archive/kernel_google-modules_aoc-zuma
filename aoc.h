@@ -63,6 +63,8 @@ wait_queue_head_t *aoc_service_get_write_queue(struct aoc_service_dev *dev);
  */
 bool aoc_service_flush_read_data(struct aoc_service_dev *dev);
 
+bool aoc_online_state(struct aoc_service_dev *dev);
+
 struct aoc_driver {
 	struct device_driver drv;
 

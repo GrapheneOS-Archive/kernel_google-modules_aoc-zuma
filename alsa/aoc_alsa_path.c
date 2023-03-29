@@ -288,7 +288,11 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 			.rates = SNDRV_PCM_RATE_48000,
 			.formats = SNDRV_PCM_FMTBIT_S32_LE,
 			.channels_min = 2,
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 			.channels_max = 2,
+#else
+			.channels_max = 4,
+#endif
 		},
 		.name = "audio_raw",
 		.id = IDX_RAW_RX,
@@ -332,7 +336,11 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 			.rates = SNDRV_PCM_RATE_96000,
 			.formats = SNDRV_PCM_FMTBIT_S32_LE,
 			.channels_min = 2,
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 			.channels_max = 2,
+#else
+			.channels_max = 4,
+#endif
 		},
 		.name = "audio_ultrasonic",
 		.id = IDX_US_RX,
