@@ -134,6 +134,9 @@ struct aoc_prvdata {
 	struct mbox_slot mbox_channels[AOC_MBOX_CHANNELS];
 	struct aoc_service_dev **services;
 
+	unsigned long *read_blocked_mask;
+	unsigned long *write_blocked_mask;
+
 	struct work_struct online_work;
 	struct resource dram_resource;
 	aoc_map_handler map_handler;
@@ -260,9 +263,6 @@ struct aoc_client {
 	int client_id;
 	int endpoint;
 };
-
-static unsigned long read_blocked_mask;
-static unsigned long write_blocked_mask;
 
 static bool aoc_fpga_reset(struct aoc_prvdata *prvdata);
 static bool write_reset_trampoline(u32 addr);
@@ -989,11 +989,11 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 		if (!block)
 			return -EAGAIN;
 
-		set_bit(service_number, &read_blocked_mask);
+		set_bit(service_number, prvdata->read_blocked_mask);
 		ret = wait_event_interruptible(dev->read_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_read_message(service, AOC_UP));
-		clear_bit(service_number, &read_blocked_mask);
+		clear_bit(service_number, prvdata->read_blocked_mask);
 	}
 
 	if (dev->dead)
@@ -1072,13 +1072,13 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 	}
 
 	if (!aoc_service_can_read_message(service, AOC_UP)) {
-		set_bit(service_number, &read_blocked_mask);
+		set_bit(service_number, prvdata->read_blocked_mask);
 		ret = wait_event_interruptible_timeout(
 			dev->read_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_read_message(service, AOC_UP),
 			timeout);
-		clear_bit(service_number, &read_blocked_mask);
+		clear_bit(service_number, prvdata->read_blocked_mask);
 	}
 
 	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
@@ -1159,11 +1159,11 @@ ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 		if (!block)
 			return -EAGAIN;
 
-		set_bit(service_number, &write_blocked_mask);
+		set_bit(service_number, prvdata->write_blocked_mask);
 		ret = wait_event_interruptible(dev->write_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_write_message(service, AOC_DOWN));
-		clear_bit(service_number, &write_blocked_mask);
+		clear_bit(service_number, prvdata->write_blocked_mask);
 	}
 
 	if (dev->dead)
@@ -1235,13 +1235,13 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 	}
 
 	if (!aoc_service_can_write_message(service, AOC_DOWN)) {
-		set_bit(service_number, &write_blocked_mask);
+		set_bit(service_number, prvdata->write_blocked_mask);
 		ret = wait_event_interruptible_timeout(
 			dev->write_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_write_message(service, AOC_DOWN),
 			timeout);
-		clear_bit(service_number, &write_blocked_mask);
+		clear_bit(service_number, prvdata->write_blocked_mask);
 	}
 
 	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
@@ -1310,18 +1310,22 @@ EXPORT_SYMBOL_GPL(aoc_service_can_write);
 void aoc_service_set_read_blocked(struct aoc_service_dev *dev)
 {
 	int service_number;
+	struct device *parent = dev->dev.parent;
+	struct aoc_prvdata *prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
-	set_bit(service_number, &read_blocked_mask);
+	set_bit(service_number, prvdata->read_blocked_mask);
 }
 EXPORT_SYMBOL_GPL(aoc_service_set_read_blocked);
 
 void aoc_service_set_write_blocked(struct aoc_service_dev *dev)
 {
 	int service_number;
+	struct device *parent = dev->dev.parent;
+	struct aoc_prvdata *prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
-	set_bit(service_number, &write_blocked_mask);
+	set_bit(service_number, prvdata->write_blocked_mask);
 }
 EXPORT_SYMBOL_GPL(aoc_service_set_write_blocked);
 
@@ -2219,6 +2223,19 @@ static void aoc_did_become_online(struct work_struct *work)
 
 	prvdata->total_services = s;
 
+	if (prvdata->read_blocked_mask == NULL) {
+		prvdata->read_blocked_mask = devm_kcalloc(prvdata->dev, BITS_TO_LONGS(s),
+							  sizeof(unsigned long), GFP_KERNEL);
+		if (!prvdata->read_blocked_mask)
+			goto err;
+	}
+
+	if (prvdata->write_blocked_mask == NULL) {
+		prvdata->write_blocked_mask = devm_kcalloc(prvdata->dev, BITS_TO_LONGS(s),
+							  sizeof(unsigned long), GFP_KERNEL);
+		if (!prvdata->write_blocked_mask)
+			goto err;
+	}
 
 	for (i = 0; i < s; i++) {
 		create_service_device(prvdata, i);
@@ -2373,11 +2390,11 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 		if (service_dev->handler) {
 			service_dev->handler(service_dev);
 		} else {
-			if (test_bit(i, &read_blocked_mask) &&
+			if (test_bit(i, prvdata->read_blocked_mask) &&
 			    aoc_service_can_read_message(service, AOC_UP))
 				wake_up(&service_dev->read_queue);
 
-			if (test_bit(i, &write_blocked_mask) &&
+			if (test_bit(i, prvdata->write_blocked_mask) &&
 			    aoc_service_can_write_message(service, AOC_DOWN))
 				wake_up(&service_dev->write_queue);
 		}
