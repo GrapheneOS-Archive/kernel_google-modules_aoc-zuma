@@ -1723,6 +1723,80 @@ static int aoc_audio_chirp_mode_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int aoc_audio_chre_src_gain_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol) {
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int chre_path = mc->shift;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chre_src_gain[chre_path];
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_chre_src_gain_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	int err = 0;
+
+	int chre_path = mc->shift;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chre_src_gain[chre_path] = ucontrol->value.integer.value[0];
+	switch (chre_path) {
+		case CHRE_GAIN_PATH_PDM:
+			err = aoc_audio_set_chre_src_pdm_gain(chip, chip->chre_src_gain[chre_path]);
+			break;
+		case CHRE_GAIN_PATH_AEC:
+			err = aoc_audio_set_chre_src_aec_gain(chip, chip->chre_src_gain[chre_path]);
+			break;
+		default:
+			pr_err("Unknown CHRE gain path: %d", chre_path);
+			break;
+	}
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int aoc_audio_chre_src_aec_timeout_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol) {
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chre_src_aec_timeout;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_chre_src_aec_timeout_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chre_src_aec_timeout = ucontrol->value.integer.value[0];
+	err = aoc_audio_set_chre_src_aec_timeout(chip, chip->chre_src_aec_timeout);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int a2dp_encoder_parameters_put(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2181,6 +2255,12 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		0, 20, 200, 0, aoc_audio_chirp_interval_get, aoc_audio_chirp_interval_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Mode", SND_SOC_NOPM,
 		0, 0, 10, 0, aoc_audio_chirp_mode_get, aoc_audio_chirp_mode_set, NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC PDM Gain (cB)", SND_SOC_NOPM,
+		CHRE_GAIN_PATH_PDM, -1280, 1280, 0, aoc_audio_chre_src_gain_get, aoc_audio_chre_src_gain_set, NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC AEC Gain (cB)", SND_SOC_NOPM,
+		CHRE_GAIN_PATH_AEC, -1280, 1280, 0, aoc_audio_chre_src_gain_get, aoc_audio_chre_src_gain_set, NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC AEC Timeout in MSec", SND_SOC_NOPM,
+		0, 0, 60000, 0, aoc_audio_chre_src_aec_timeout_get, aoc_audio_chre_src_aec_timeout_set, NULL),
 };
 
 int snd_aoc_new_ctl(struct aoc_chip *chip)
