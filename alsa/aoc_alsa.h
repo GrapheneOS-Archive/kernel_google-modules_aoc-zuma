@@ -213,6 +213,8 @@ enum { PLAYBACK_MODE, VOICE_TX_MODE, VOICE_RX_MODE, HAPTICS_MODE, OFFLOAD_MODE }
 enum { TIMER = 0, INTR };
 enum { INCALL_CHANNEL = 5, PCM_CHANNEL = 20, HIFI_CHANNEL, VOIP_CHANNEL};
 
+enum { CHRE_GAIN_PATH_PDM = 0, CHRE_GAIN_PATH_AEC, CHRE_GAIN_PATH_TOT };
+
 struct aoc_chip {
 	struct snd_card *card;
 	struct snd_soc_jack jack; /* TODO: temporary use, need refactor  */
@@ -264,6 +266,8 @@ struct aoc_chip {
 	int chirp_enable;
 	int chirp_interval;
 	int chirp_mode;
+	int chre_src_gain[CHRE_GAIN_PATH_TOT];
+	int chre_src_aec_timeout;
 	unsigned int opened;
 	unsigned int capture_param_set;
 	struct mutex audio_mutex;
@@ -443,6 +447,10 @@ int aoc_audio_volume_set(struct aoc_chip *chip, uint32_t volume,
 			 int src, int dst);
 
 int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value);
+
+int aoc_audio_set_chre_src_pdm_gain(struct aoc_chip *chip, int gain);
+int aoc_audio_set_chre_src_aec_gain(struct aoc_chip *chip, int gain);
+int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout);
 
 int prepare_phonecall(struct aoc_alsa_stream *alsa_stream);
 int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);

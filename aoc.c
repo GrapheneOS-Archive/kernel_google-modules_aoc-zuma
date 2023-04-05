@@ -144,6 +144,10 @@
 #define MAX_SENSOR_POWER_NUM 5
 #define MAX_DMIC_POWER_NUM 4
 
+#define RESET_WAIT_TIMES_NUM 3
+#define RESET_WAIT_TIME_MS 3000
+#define RESET_WAIT_TIME_INCREMENT_MS  2048
+
 static DEFINE_MUTEX(aoc_service_lock);
 
 enum AOC_FW_STATE {
@@ -228,6 +232,7 @@ struct aoc_prvdata {
 	struct notifier_block itmon_nb;
 #endif
 	struct device *gsa_dev;
+	bool protected_by_gsa;
 
 	int sensor_power_count;
 	const char *sensor_power_list[MAX_SENSOR_POWER_NUM];
@@ -236,6 +241,10 @@ struct aoc_prvdata {
 	int dmic_power_count;
 	const char *dmic_power_list[MAX_DMIC_POWER_NUM];
 	struct regulator *dmic_regulator[MAX_DMIC_POWER_NUM];
+
+	int reset_hysteresis_trigger_ms;
+	u64 last_reset_time_ns;
+	int reset_wait_time_index;
 };
 
 /* TODO: Reduce the global variables (move into a driver structure) */
@@ -878,6 +887,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	}
 
 	fw_signed = _aoc_fw_is_signed(fw);
+	prvdata->protected_by_gsa = fw_signed;
 
 	dev_info(dev, "Loading %s aoc image\n", fw_signed ? "signed" : "unsigned");
 
@@ -2598,13 +2608,28 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 	}
 
-	/* TODO: GSA_AOC_SHUTDOWN needs to be 4, but the current header defines
-	 * as 2.  Change this when the header is updated
-	 */
-	gsa_send_aoc_cmd(prvdata->gsa_dev, 4);
-	rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
-	if (rc)
-		dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+	if(prvdata->protected_by_gsa) {
+		/* TODO(b/275463650): GSA_AOC_SHUTDOWN needs to be 4, but the current
+		 * header defines as 2.  Change this to enum when the header is updated.
+		 */
+		rc = gsa_send_aoc_cmd(prvdata->gsa_dev, 4);
+		/* rc is the new state of AOC unless it's negative,
+		 * in which case it's an error code
+		 */
+		if(rc != GSA_AOC_STATE_LOADED) {
+			if(rc >= 0) {
+				dev_err(prvdata->dev,
+					"GSA shutdown command returned unexpected state: %d\n", rc);
+			} else {
+				dev_err(prvdata->dev,
+					"GSA shutdown command returned error: %d\n", rc);
+			}
+		}
+
+		rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
+		if (rc)
+			dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+	}
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
@@ -2759,6 +2784,26 @@ static void aoc_watchdog(struct work_struct *work)
 	bool ap_reset = false;
 
 	prvdata->total_restarts++;
+
+	if (prvdata->ap_triggered_reset) {
+		if ((ktime_get_real_ns() - prvdata->last_reset_time_ns) / 1000000
+			<= prvdata->reset_hysteresis_trigger_ms) {
+			/* If the watchdog was triggered recently, busy wait to
+			 * avoid overlapping resets.
+			 */
+			dev_err(prvdata->dev, "Triggered hysteresis for AP reset, waiting %d ms",
+				RESET_WAIT_TIME_MS +
+				prvdata->reset_wait_time_index * RESET_WAIT_TIME_INCREMENT_MS);
+			msleep(RESET_WAIT_TIME_MS +
+				prvdata->reset_wait_time_index * RESET_WAIT_TIME_INCREMENT_MS);
+			if (prvdata->reset_wait_time_index < RESET_WAIT_TIMES_NUM)
+				prvdata->reset_wait_time_index++;
+		} else {
+			prvdata->reset_wait_time_index = 0;
+		}
+	}
+
+	prvdata->last_reset_time_ns = ktime_get_real_ns();
 
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
@@ -3336,6 +3381,9 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->enable_uart_tx = 0;
 	prvdata->force_voltage_nominal = 0;
 	prvdata->no_ap_resets = 0;
+	prvdata->reset_hysteresis_trigger_ms = 10000;
+	prvdata->last_reset_time_ns = ktime_get_real_ns();
+	prvdata->reset_wait_time_index = 0;
 
 	rc = find_gsa_device(prvdata);
 	if (rc) {
