@@ -339,6 +339,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 	alsa_stream->send_metadata = 1;
 	alsa_stream->eof_reach = 0;
 	alsa_stream->gapless_offload_enable = chip->gapless_offload_enable;
+	snd_compr_use_pause_in_draining(cstream);
 
 	err = aoc_audio_open(alsa_stream);
 	if (err != 0) {
@@ -537,6 +538,8 @@ static int aoc_compr_trigger(struct snd_soc_component *component, struct snd_com
 			if (err != 0)
 				pr_err("failed to pause alsa device (%d)\n",
 				       err);
+			cstream->runtime->state = SNDRV_PCM_STATE_PAUSED;
+			wake_up(&cstream->runtime->sleep);
 		}
 		break;
 
