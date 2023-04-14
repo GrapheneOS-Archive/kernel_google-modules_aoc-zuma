@@ -158,7 +158,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	idx = substream->pcm->device;
 	dev_dbg(component->dev, "pcm device open (%d)\n", idx);
-	dev_dbg(component->dev, "chip open (%d)\n", chip->opened);
+	dev_dbg(component->dev, "chip open (%llu)\n", chip->opened);
 
 	/* Find the corresponding aoc audio service */
 	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, NULL, NULL);

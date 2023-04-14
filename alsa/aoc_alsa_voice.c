@@ -85,7 +85,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	idx = substream->pcm->device;
 	pr_debug("pcm device open (%d)\n", idx);
-	pr_debug("chip open (%d)\n", chip->opened);
+	pr_debug("chip open (%llu)\n", chip->opened);
 
 	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
 	if (alsa_stream == NULL) {

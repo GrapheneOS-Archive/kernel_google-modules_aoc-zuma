@@ -548,6 +548,18 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 		.id = IDX_ANDROID_AEC_TX,
 	},
 
+	{
+		.capture = {
+			.stream_name = "audio_hotword_tap",
+			.rates = SNDRV_PCM_RATE_16000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+			.channels_min = 1,
+			.channels_max = 2,
+		},
+		.name = "audio_hotword_tap",
+		.id = IDX_HOTWORD_TAP_TX,
+	},
+
 	/* BE dai */
 	{
 		.playback = {
