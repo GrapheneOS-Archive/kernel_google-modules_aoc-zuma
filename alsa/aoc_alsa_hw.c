@@ -2205,6 +2205,18 @@ int aoc_load_cca_module(struct aoc_chip *chip, long load)
 	return err;
 }
 
+int aoc_enable_cca_on_voip(struct aoc_chip *chip, long enable)
+{
+	int cmd_id, err = 0;
+
+	cmd_id = (enable == 1) ?
+			CMD_AUDIO_OUTPUT_VOICE_ENABLE_CCA_ON_VOIP_ID :
+			CMD_AUDIO_OUTPUT_VOICE_DISABLE_CCA_ON_VOIP_ID;
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+
+	return err;
+}
+
 int aoc_lvm_enable_get(struct aoc_chip *chip, long *enable)
 {
 	int err;

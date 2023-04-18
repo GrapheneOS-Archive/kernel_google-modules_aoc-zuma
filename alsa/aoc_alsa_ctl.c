@@ -713,6 +713,40 @@ static int audio_cca_module_load_ctl_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int audio_enable_cca_on_voip_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->enable_cca_on_voip;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_enable_cca_on_voip_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->enable_cca_on_voip = ucontrol->value.integer.value[0];
+	err = aoc_enable_cca_on_voip(chip, chip->enable_cca_on_voip);
+	if (err < 0)
+		pr_err("ERR:%d %s CCA fail\n", err,
+		       (chip->enable_cca_on_voip) ? "Enable" : "Disable");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int audio_gapless_offload_ctl_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2297,6 +2331,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_SINGLE_EXT("CCA Module Load", SND_SOC_NOPM, 0, 1, 0,
 		       audio_cca_module_load_ctl_get, audio_cca_module_load_ctl_set),
+
+	SOC_SINGLE_EXT("Enable CCA ON VOIP", SND_SOC_NOPM, 0, 1, 0,
+		       audio_enable_cca_on_voip_ctl_get, audio_enable_cca_on_voip_ctl_set),
 
 	SOC_SINGLE_EXT("Gapless Offload Enable", SND_SOC_NOPM, 0, 1, 0,
 		       audio_gapless_offload_ctl_get, audio_gapless_offload_ctl_set),
