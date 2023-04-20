@@ -2430,6 +2430,59 @@ int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
 	return 0;
 }
 
+int aoc_mel_enable(struct aoc_chip *chip, int enable)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_STATE cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_STATE_ID, sizeof(cmd));
+
+	cmd.enable = enable ? true : false;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel enable\n", err);
+
+	return err;
+}
+
+int aoc_mel_rs2_set(struct aoc_chip *chip, long *rs2)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_RS2 cmd;
+	uint32_t tmp;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_SET_RS2_ID, sizeof(cmd));
+
+	tmp = (uint32_t)rs2[0];
+	cmd.rs2_value = *(float *)(&tmp);
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel rs2 set\n", err);
+
+	return err;
+}
+
+int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_RS2 cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_GET_RS2_ID, sizeof(cmd));
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel rs2 get\n", err);
+	else
+		*rs2 = *(uint32_t *)&cmd.rs2_value;
+
+	return err;
+}
+
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable)
 {
 	int err = 0;

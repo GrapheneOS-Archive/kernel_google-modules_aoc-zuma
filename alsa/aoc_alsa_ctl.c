@@ -1124,6 +1124,75 @@ static int voice_pcm_wait_time_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int audio_mel_enable_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->mel_enable;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_mel_enable_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->mel_enable = ucontrol->value.integer.value[0];
+	err = aoc_mel_enable(chip, chip->mel_enable);
+	if (err < 0)
+		pr_err("ERR:%d set:%d mel fail\n", err, chip->mel_enable);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int audio_mel_rs2_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_mel_rs2_get(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d mel rs2 get fail\n", err);
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_mel_rs2_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	err = aoc_mel_rs2_set(chip, &ucontrol->value.integer.value[0]);
+	if (err < 0)
+		pr_err("ERR:%d mel rs2 set %ld fail\n", err,
+		       ucontrol->value.integer.value[0]);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 static int audio_capture_mic_source_get(struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
 {
@@ -2514,6 +2583,11 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("Displayport Audio Start Threshold", SND_SOC_NOPM, 0,
 			MAX_DP_START_THRESHOLD, 0,
 			dp_start_threshold_get, dp_start_threshold_set),
+
+	SOC_SINGLE_EXT("Mel Processor Enable", SND_SOC_NOPM, 0, 1, 0,
+		       audio_mel_enable_ctl_get, audio_mel_enable_ctl_set),
+	SOC_SINGLE_EXT("Mel Processor RS2", SND_SOC_NOPM, 0, INT_MAX, 0,
+		       audio_mel_rs2_ctl_get, audio_mel_rs2_ctl_set),
 
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
