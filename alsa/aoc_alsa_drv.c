@@ -109,7 +109,7 @@ static void audio_set_isr(struct aoc_service_dev *dev)
 	}
 }
 
-static void audio_free_isr(struct aoc_service_dev *dev)
+void audio_free_isr(struct aoc_service_dev *dev)
 {
 	if ( dev->mbox_index == PCM_CHANNEL || dev->mbox_index == INCALL_CHANNEL ||
 		 dev->mbox_index == HIFI_CHANNEL || dev->mbox_index == VOIP_CHANNEL) {
@@ -117,6 +117,7 @@ static void audio_free_isr(struct aoc_service_dev *dev)
 		dev->handler = NULL;
 	}
 }
+EXPORT_SYMBOL_GPL(audio_free_isr);
 
 int8_t aoc_audio_service_num(void)
 {
@@ -203,7 +204,6 @@ int free_aoc_audio_service(const char *name, struct aoc_service_dev *dev)
 	}
 
 	if (service_lists[i].dev) {
-		audio_free_isr(service_lists[i].dev);
 		service_lists[i].dev->prvdata = NULL;
 	}
 
