@@ -33,6 +33,7 @@ static void free_aoc_service_work_handler(struct work_struct *work)
 		return;
 
 	aoc_timer_stop_sync(alsa_stream);
+	audio_free_isr(alsa_stream->dev);
 	cancel_work_sync(&alsa_stream->pcm_period_work);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
@@ -164,6 +165,9 @@ static enum hrtimer_restart aoc_pcm_irq_process(struct aoc_alsa_stream *alsa_str
 	 * the playback case represents what has been read from the buffer,
 	 * not what already played out .
 	*/
+	if (alsa_stream->dev == NULL)
+		return HRTIMER_RESTART;
+
 	dev = alsa_stream->dev;
 	consumed = ((alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
 				  aoc_ring_bytes_read(dev->service, AOC_DOWN) :
@@ -384,6 +388,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 
 	pr_debug("%s: name %s substream %p", __func__, rtd->dai_link->name, substream);
 	aoc_timer_stop_sync(alsa_stream);
+	audio_free_isr(alsa_stream->dev);
 	cancel_work_sync(&alsa_stream->pcm_period_work);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {

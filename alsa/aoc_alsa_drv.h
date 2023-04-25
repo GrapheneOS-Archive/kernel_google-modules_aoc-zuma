@@ -45,4 +45,5 @@ bool aoc_audio_current_state(void);
 
 struct aoc_state_client_t *alloc_audio_state_client(void);
 void free_audio_state_client(struct aoc_state_client_t *client);
+void audio_free_isr(struct aoc_service_dev *dev);
 #endif
