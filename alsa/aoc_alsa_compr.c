@@ -315,7 +315,7 @@ static int aoc_compr_playback_open(struct snd_compr_stream *cstream)
 
 	idx = cstream->device->device;
 	pr_notice("alsa compr offload open (%d)\n", idx);
-	pr_debug("chip open (%d)\n", chip->opened);
+	pr_debug("chip open (%llu)\n", chip->opened);
 
 	alsa_stream = kzalloc(sizeof(struct aoc_alsa_stream), GFP_KERNEL);
 	if (alsa_stream == NULL) {

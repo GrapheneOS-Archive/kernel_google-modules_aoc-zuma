@@ -169,7 +169,7 @@ static aoc_audio_stream_type[] = {
 	[15] = NORMAL, [16] = NORMAL,  [17] = NORMAL,	   [18] = INCALL, [19] = INCALL,
 	[20] = INCALL, [21] = INCALL,  [22] = INCALL,	   [23] = MMAPED, [24] = NORMAL,
 	[25] = HIFI,   [26] = HIFI,    [27] = ANDROID_AEC, [28] = MMAPED, [29] = INCALL,
-	[30] = NORMAL, [31] = CAP_INJ,
+	[30] = NORMAL, [31] = CAP_INJ, [32] = HOTWORD_TAP,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
@@ -1712,7 +1712,7 @@ static int aoc_audio_capture_set_params(struct aoc_alsa_stream *alsa_stream, uin
 	/* Regular audio capture should be the primary setting of the single ap filter */
 	if ((alsa_stream->idx != UC_ULTRASONIC_RECORD) &&
 	    (chip->capture_param_set & (1 << UC_AUDIO_RECORD))) {
-		pr_info("%s: ignore capture set param 0x%x", __func__, chip->capture_param_set);
+		pr_info("%s: ignore capture set param 0x%llu", __func__, chip->capture_param_set);
 		chip->capture_param_set |= (1 << alsa_stream->idx);
 
 		if (!aoc_ring_flush_read_data(alsa_stream->dev->service, AOC_UP, 0)) {
@@ -2157,12 +2157,29 @@ int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable)
 				       CMD_AUDIO_INPUT_MIC_RECORD_AP_DISABLE_AEC_ID;
 	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
 	if (err < 0) {
-		pr_err("ERR:%d in aduio capture eraser %s\n", err, (enable) ? "enable" : "disable");
+		pr_err("ERR:%d in audio capture eraser %s\n", err, (enable) ? "enable" : "disable");
 		return err;
 	}
 
 	return 0;
 }
+
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+int aoc_hotword_tap_enable(struct aoc_chip *chip, long enable)
+{
+	int cmd_id, err = 0;
+
+	cmd_id = (enable == 1) ? CMD_AUDIO_INPUT_HOTWORD_ENABLE_HOTWORD_TAP_ID :
+				       CMD_AUDIO_INPUT_HOTWORD_DISABLE_HOTWORD_TAP_ID;
+	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in hotword tap %s\n", err, (enable) ? "enable" : "disable");
+		return err;
+	}
+
+	return 0;
+}
+#endif
 
 int aoc_load_cca_module(struct aoc_chip *chip, long load)
 {
@@ -2596,6 +2613,9 @@ int aoc_audio_incall_start(struct aoc_alsa_stream *alsa_stream)
 	if (alsa_stream->stream_type == ANDROID_AEC)
 		return aoc_audio_android_aec_start(alsa_stream);
 
+	if (alsa_stream->stream_type == HOTWORD_TAP)
+		return 0;
+
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		stream = alsa_stream->entry_point_idx - 18;
@@ -2627,6 +2647,9 @@ int aoc_audio_incall_stop(struct aoc_alsa_stream *alsa_stream)
 
 	if (alsa_stream->stream_type == ANDROID_AEC)
 		return aoc_audio_android_aec_stop(alsa_stream);
+
+	if (alsa_stream->stream_type == HOTWORD_TAP)
+		return 0;
 
 	/* TODO: stream number inferred by pcm device idx, pb_0:18, cap_0:20, better way needed */
 	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -2793,12 +2816,12 @@ int aoc_audio_set_ctls(struct aoc_chip *chip)
 	/* change ctls for all substreams */
 	for (i = 0; i < MAX_NUM_OF_SUBSTREAMS; i++) {
 		if (chip->avail_substreams & (1 << i)) {
-			pr_debug(" Setting %d stream i =%d\n",
+			pr_debug(" Setting %llu stream i =%d\n",
 				 chip->avail_substreams, i);
 
 			if (!chip->alsa_stream[i]) {
 				pr_debug(
-					" No ALSA stream available?! %i:%p (%x)\n",
+					" No ALSA stream available?! %i:%p (%llu)\n",
 					i, chip->alsa_stream[i],
 					chip->avail_substreams);
 				err = 0;
