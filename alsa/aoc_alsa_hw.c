@@ -3628,8 +3628,7 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 		sizeof(cmd));
 
 	/* TODO: HAL only passes MP3 or AAC, need to consider/test other AAC options */
-	cmd.cfg.format = (type == SND_AUDIOCODEC_MP3) ? AUDIO_OUTPUT_DECODER_MP3 :
-							AUDIO_OUTPUT_DECODER_AAC_LC;
+	cmd.cfg.format = type;
 	cmd.cfg.samplerate = alsa_stream->params_rate;
 	cmd.cfg.channels = alsa_stream->channels;
 	cmd.address = 0;
