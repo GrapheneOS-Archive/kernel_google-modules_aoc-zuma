@@ -22,17 +22,30 @@
 struct aoc_auth_header {
 	u8 signature[512];
 	u8 key[512];
-	struct {
-		u32 magic;
-		u32 generation;
-		u32 rollback_info;
-		u32 length;
-		u8 flags [16];
-		u8 hash [32];
-		u8 chip_id [32];
-		u8 auth_config [256];
-		u8 image_config [256];
-	} header;
+	union {
+		struct {
+			u32 magic;
+			u32 generation;
+			u32 rollback_info;
+			u32 length;
+			u8 flags [16];
+			u8 hash [32];
+			u8 chip_id [32];
+			u8 auth_config [256];
+			u8 image_config [256];
+		} header_v1;
+		struct {
+			u32 magic;
+			u32 generation;
+			u32 rollback_info;
+			u32 length;
+			u8 flags [16];
+			u8 hash [64];
+			u8 chip_id [32];
+			u8 auth_config [256];
+			u8 image_config [256];
+		} header_v2;
+	};
 } __packed;
 
 struct aoc_superbin_header {
@@ -129,12 +142,19 @@ bool _aoc_fw_is_release(const struct firmware *fw)
 
 bool _aoc_fw_is_signed(const struct firmware *fw)
 {
+	const u32 kAuthHeaderMagicValueAoC = 0x00434F41;
+
 	const struct aoc_auth_header *header = (const struct aoc_auth_header *)(fw->data);
-	if (le32_to_cpu(header->header.magic) != 0x00434F41) {
-		return false;
+	if ((le32_to_cpu(header->header_v1.generation) == 1) &&
+			le32_to_cpu(header->header_v1.magic) == kAuthHeaderMagicValueAoC) {
+		return true;
+	}
+	if ((le32_to_cpu(header->header_v2.generation) == 2) &&
+			le32_to_cpu(header->header_v2.magic) == kAuthHeaderMagicValueAoC) {
+		return true;
 	}
 
-	return true;
+	return false;
 }
 
 bool _aoc_fw_is_compatible(const struct firmware *fw)
