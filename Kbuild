@@ -2,6 +2,7 @@
 
 ccflags-y	+= -I$(srctree)/../private/google-modules/aoc_ipc
 ccflags-y	+= -I$(srctree)/../private/google-modules/soc/gs/drivers/dma-buf/heaps
+ccflags-y	+= -I$(srctree)/../private/google-modules/trusty/include
 ccflags-y	+= -I$(srctree)/drivers/dma-buf
 
 obj-$(CONFIG_WC_MBOX)			+= mailbox-wc.o
