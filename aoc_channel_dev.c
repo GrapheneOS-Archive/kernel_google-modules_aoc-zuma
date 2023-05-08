@@ -72,6 +72,8 @@ static int aocc_remove(struct aoc_service_dev *dev);
 static const char * const channel_service_names[] = {
 	"com.google.usf",
 	"com.google.usf.non_wake_up",
+	"com.google.chre",
+	"com.google.chre.non_wake_up",
 	"usf_sh_mem_doorbell",
 	NULL,
 };
@@ -210,8 +212,8 @@ static int aocc_demux_kthread(void *data)
 			if (channel == entry->channel_index) {
 				handler_found = 1;
 				if (!node->msg.non_wake_up &&
-				    strcmp(dev_name(&service->dev),
-					   "com.google.usf") == 0) {
+				    (strcmp(dev_name(&service->dev),"com.google.usf") == 0 ||
+				     strcmp(dev_name(&service->dev),"com.google.chre") == 0)) {
 					take_wake_lock = true;
 				}
 
