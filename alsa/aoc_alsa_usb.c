@@ -11,6 +11,7 @@
 
 #include <sound/core.h>
 #include <linux/usb.h>
+#include <trace/hooks/audio_usboffload.h>
 
 #include "aoc_alsa.h"
 #include "card.h"
@@ -111,7 +112,11 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 	device = achip->usb_device;
 	direction = achip->usb_direction;
 	chip = uadev[card_num].chip;
-
+	if (!chip) {
+		pr_err("%s no device connected (card %d device %d, direction %d)",
+			__func__, card_num, device, direction);
+		return -ENODEV;
+	}
 	pr_info("%s card %d device %d, direction %d", __func__,
 			card_num, device, direction);
 	if ((card_num >= 0 && card_num < SNDRV_CARDS) &&
@@ -143,12 +148,6 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 	return 0;
 }
 
-static struct snd_usb_platform_ops ops = {
-	.connect_cb = usb_audio_offload_connect,
-	.disconnect_cb = usb_audio_offload_disconnect,
-	.suspend_cb = usb_audio_offload_suspend,
-};
-
 bool aoc_alsa_usb_callback_register(
 			void (*callback)(struct usb_device*, struct usb_host_endpoint*))
 {
@@ -172,23 +171,31 @@ void aoc_alsa_usb_callback_unregister(void)
 }
 EXPORT_SYMBOL_GPL(aoc_alsa_usb_callback_unregister);
 
+static void audio_usb_offload_connect(void *unused, struct usb_interface *intf,
+			struct snd_usb_audio *chip)
+{
+	usb_audio_offload_connect(chip);
+}
+
+static void audio_usb_offload_disconnect(void *unused, struct usb_interface *intf)
+{
+	struct snd_usb_audio *chip = usb_get_intfdata(intf);
+
+	usb_audio_offload_disconnect(chip);
+}
+
 int aoc_usb_init(void)
 {
 	int ret = 0;
 
-	ret = snd_usb_register_platform_ops(&ops);
-	if (ret < 0) {
-		pr_err("%s snd_usb_register_platform_ops fail", __func__);
-	} else {
-		pr_info("%s registered usb callback", __func__);
-	}
+	register_trace_android_vh_audio_usb_offload_connect(audio_usb_offload_connect, NULL);
+	register_trace_android_rvh_audio_usb_offload_disconnect(audio_usb_offload_disconnect, NULL);
 
 	return ret;
 }
 
 void aoc_usb_exit(void)
 {
-	pr_info("%s unregister usb callback", __func__);
-	snd_usb_unregister_platform_ops();
+	unregister_trace_android_vh_audio_usb_offload_connect(audio_usb_offload_connect, NULL);
 }
 
