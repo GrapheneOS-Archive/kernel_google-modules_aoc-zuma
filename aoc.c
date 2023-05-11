@@ -221,6 +221,8 @@ struct aoc_prvdata {
 	int reset_wait_time_index;
 };
 
+struct aoc_prvdata *aoc_prvdata_copy;
+
 /* TODO: Reduce the global variables (move into a driver structure) */
 /* Resources found from the device tree */
 static struct resource *aoc_sram_resource;
@@ -1593,6 +1595,7 @@ static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size)
 		return;
 
 	prvdata = platform_get_drvdata(aoc_platform_device);
+	pr_info("AOC prvdata pointer is: %p (expected: %p)", prvdata, aoc_prvdata_copy);
 	prvdata->aoc_reset_done = true;
 	wake_up(&prvdata->aoc_reset_wait_queue);
 }
@@ -3259,6 +3262,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		rc = -ENOMEM;
 		goto err_failed_prvdata_alloc;
 	}
+	aoc_prvdata_copy = prvdata;
 
 	prvdata->dev = dev;
 	prvdata->disable_monitor_mode = 0;
