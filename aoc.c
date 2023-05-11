@@ -1819,6 +1819,10 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 	int ret = 0;
 	int i;
 
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+		goto exit;
+
 	ret += scnprintf(buf, PAGE_SIZE, "Services : %d\n", services);
 	for (i = 0; i < services && ret < (PAGE_SIZE - 1); i++) {
 		aoc_service *s = service_at_index(prvdata, i);
@@ -1843,6 +1847,8 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 				hdr->regions[1].tx, hdr->regions[1].rx);
 		}
 	}
+exit:
+	atomic_dec(&prvdata->aoc_process_active);
 
 	return ret;
 }
