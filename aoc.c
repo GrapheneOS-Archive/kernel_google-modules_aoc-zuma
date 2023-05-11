@@ -267,6 +267,9 @@ static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
 static int aoc_bus_remove(struct device *dev);
 
+static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw);
+static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p);
+
 static struct bus_type aoc_bus_type = {
 	.name = "aoc",
 	.match = aoc_bus_match,
@@ -749,7 +752,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
-	bool fw_signed;
+	bool fw_signed, gsa_enabled;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -841,13 +844,22 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	_aoc_fw_commit(fw, aoc_dram_virt_mapping + AOC_BINARY_DRAM_OFFSET);
 
+	gsa_enabled = of_property_read_bool(prvdata->dev->of_node, "gsa-enabled");
+
 	if (fw_signed) {
-		int rc = aoc_fw_authenticate(prvdata, fw);
-		if (rc) {
-			dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
-			goto free_fw;
+		if (gsa_enabled) {
+			int rc = aoc_fw_authenticate(prvdata, fw);
+
+			if (rc) {
+				dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
+				goto free_fw;
+			}
+		} else {
+			aoc_configure_sysmmu(prvdata, fw);
+			write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
 		}
 	} else {
+		aoc_configure_sysmmu_manual(prvdata);
 		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
 	}
 
@@ -861,7 +873,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
 
 	/* start AOC */
-	if (fw_signed) {
+	if (fw_signed && gsa_enabled) {
 		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
 		if (rc < 0) {
 			dev_err(dev, "GSA: Failed to start AOC: %d\n", rc);
@@ -2096,82 +2108,45 @@ static inline void aoc_configure_ssmt( struct platform_device *pdev
     __attribute__((unused))) { }
 #endif
 
-static void aoc_configure_sysmmu(struct aoc_prvdata *p)
+static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw)
 {
 #ifndef AOC_JUNO
+	int rc;
+	size_t i, cnt;
+	struct sysmmu_entry *sysmmu;
 	struct iommu_domain *domain = p->domain;
 	struct device *dev = p->dev;
-	int rc;
+	u16 sysmmu_offset, sysmmu_size;
 
 	rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
 	if (rc)
 		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
 
-	/* Map in the AoC carveout */
-	if (iommu_map(domain, 0x98000000, p->dram_resource.start, p->dram_size,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping carveout failed\n");
-
-#if IS_ENABLED(CONFIG_SOC_GS201)
-	/* Use a 1MB mapping instead of individual mailboxes for now */
-	/* TODO: Turn the mailbox address ranges into dtb entries */
-	if (iommu_map(domain, 0x9E000000, 0x18200000, SZ_2M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n");
-
-	/* Map in GSA mailbox */
-	if (iommu_map(domain, 0x9E200000, 0x17C00000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping gsa mailbox failed\n");
-
-	/* Map in modem registers */
-	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping modem failed\n");
-
-	/* Map in BLK_TPU */
-	/* if (iommu_map(domain, 0x9E600000, 0x1CE00000, SZ_2M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n"); */
-
-	/* Map in the xhci_dma carveout */
-	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping xhci_dma carveout failed\n");
-
-	/* Map in USB for low power audio */
-	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping usb failed\n");
-#else
-	/* Map in the xhci_dma carveout */
-	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping xhci_dma carveout failed\n");
-
-	/* Use a 1MB mapping instead of individual mailboxes for now */
-	/* TODO: Turn the mailbox address ranges into dtb entries */
-	if (iommu_map(domain, 0x9E000000, 0x17600000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n");
-
-	/* Map in GSA mailbox */
-	if (iommu_map(domain, 0x9E100000, 0x17C00000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping gsa mailbox failed\n");
-
-	/* Map in USB for low power audio */
-	if (iommu_map(domain, 0x9E200000, 0x11100000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping usb failed\n");
-
-	/* Map in modem registers */
-	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping modem failed\n");
-#endif
+	sysmmu_offset = _aoc_fw_sysmmu_offset(fw);
+	sysmmu_size = _aoc_fw_sysmmu_size(fw);
+	if (!_aoc_fw_is_valid_sysmmu_size(fw)) {
+		dev_info(dev, "Invalid sysmmu table (%u @ %u)\n", sysmmu_size, sysmmu_offset);
+		return;
+	}
+	cnt = sysmmu_size / sizeof(struct sysmmu_entry);
+	sysmmu = _aoc_fw_sysmmu_entry(fw);
+	for (i = 0; i < cnt; i++, sysmmu++) {
+		dev_info(dev, "Configuring sysmmu entry = 0x%llx 0x%llx 0x%llx\n",
+					SYSMMU_VADDR(sysmmu->value), SYSMMU_PADDR(sysmmu->value),
+					SYSMMU_SIZE(sysmmu->value));
+		rc = iommu_map(domain, SYSMMU_VADDR(sysmmu->value),
+						SYSMMU_PADDR(sysmmu->value),
+						SYSMMU_SIZE(sysmmu->value),
+						IOMMU_READ | IOMMU_WRITE);
+		if (rc < 0) {
+                        dev_err(dev, "sysmmu mapping failed: %d\n", rc);
+			return;
+                }
+	}
 #endif
 }
+
+static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p) {}
 
 static void aoc_clear_sysmmu(struct aoc_prvdata *p)
 {
@@ -3384,8 +3359,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	}
 
 	aoc_configure_ssmt(pdev);
-
-	aoc_configure_sysmmu(prvdata);
 
 	if (!aoc_create_dma_buf_heaps(prvdata)) {
 		pr_err("Unable to create dma_buf heaps\n");
