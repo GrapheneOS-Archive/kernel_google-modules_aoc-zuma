@@ -250,6 +250,8 @@ struct aoc_prvdata {
 	int reset_wait_time_index;
 };
 
+struct aoc_prvdata *aoc_prvdata_copy;
+
 /* TODO: Reduce the global variables (move into a driver structure) */
 /* Resources found from the device tree */
 static struct resource *aoc_sram_resource;
@@ -1708,6 +1710,7 @@ static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size)
 		return;
 
 	prvdata = platform_get_drvdata(aoc_platform_device);
+	pr_info("AOC prvdata pointer is: %p (expected: %p)", prvdata, aoc_prvdata_copy);
 	prvdata->aoc_reset_done = true;
 	wake_up(&prvdata->aoc_reset_wait_queue);
 }
@@ -2801,12 +2804,14 @@ static void aoc_watchdog(struct work_struct *work)
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
-	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
 	u32 section_flags;
 	bool ap_reset = false;
 
 	prvdata->total_restarts++;
+
+	/* Initialize crash_info[0] to identify if it has changed later in the function. */
+	crash_info[0] = 0;
 
 	if (prvdata->ap_triggered_reset) {
 		if ((ktime_get_real_ns() - prvdata->last_reset_time_ns) / 1000000
@@ -2841,12 +2846,10 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (prvdata->ap_triggered_reset) {
+		dev_info(prvdata->dev, "AP triggered reset, reason: [%s]",
+			prvdata->ap_reset_reason);
 		prvdata->ap_triggered_reset = false;
 		ap_reset = true;
-
-		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
-			"AP Reset: %s", prvdata->ap_reset_reason);
-
 		trigger_aoc_ramdump(prvdata);
 	}
 
@@ -2861,10 +2864,10 @@ static void aoc_watchdog(struct work_struct *work)
 		const char *crash_reason = (const char *)ramdump_header +
 			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
 		bool crash_reason_valid = (strnlen(crash_reason,
-			RAMDUMP_SECTION_CRASH_INFO_SIZE) != 0);
+			sizeof(crash_info)) != 0);
 
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
+		snprintf(crash_info, sizeof(crash_info),
 			"AoC watchdog : %s (incomplete %u:%u)",
 			crash_reason_valid ? crash_reason : "unknown reason",
 			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
@@ -2874,7 +2877,7 @@ static void aoc_watchdog(struct work_struct *work)
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+			sizeof(crash_info));
 	}
 
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
@@ -2902,17 +2905,26 @@ static void aoc_watchdog(struct work_struct *work)
 			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
 
 		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
-		if (section_flags & RAMDUMP_FLAG_VALID)
-			strscpy(crash_info, crash_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		else
+		if (section_flags & RAMDUMP_FLAG_VALID) {
+			dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
+				crash_reason);
+			strscpy(crash_info, crash_reason, sizeof(crash_info));
+		} else {
+			dev_info(prvdata->dev, "aoc coredump has valid coredump header, but invalid crash reason");
 			strscpy(crash_info, "AoC Watchdog : invalid crash info",
-				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+				sizeof(crash_info));
+		}
 	}
 
 	if (ap_reset) {
 		/* Prefer the user specified reason */
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1, "%s", ap_reset_reason);
+		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
 	}
+
+	if (crash_info[0] == 0)
+		strscpy(crash_info, "AoC Watchdog: empty crash info string", sizeof(crash_info));
+
+	dev_info(prvdata->dev, "aoc crash info: [%s]", crash_info);
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
@@ -3398,6 +3410,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		rc = -ENOMEM;
 		goto err_failed_prvdata_alloc;
 	}
+	aoc_prvdata_copy = prvdata;
 
 	prvdata->dev = dev;
 	prvdata->disable_monitor_mode = 0;
