@@ -22,6 +22,8 @@ struct xhci_offload_data {
 	bool offload_state;
 
 	enum usb_offload_op_mode op_mode;
+
+	struct work_struct offload_connect_ws;
 };
 
 struct xhci_offload_data *xhci_get_offload_data(void);

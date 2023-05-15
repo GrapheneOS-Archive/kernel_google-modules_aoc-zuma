@@ -16,6 +16,8 @@
 #include <linux/workqueue.h>
 #include <linux/usb/hcd.h>
 
+#include <trace/hooks/audio_usboffload.h>
+
 #include "aoc_usb.h"
 #include "xhci-exynos.h"
 #include "xhci_offload_impl.h"
@@ -123,6 +125,28 @@ static void setup_transfer_ring(struct usb_device *udev, struct usb_host_endpoin
 	}
 }
 
+static void offload_connect_work(struct work_struct *work)
+{
+	struct xhci_hcd *xhci = offload_data->xhci;
+
+	xhci_info(xhci, "Set offloading state %s\n",
+		  offload_data->offload_state ? "true" : "false");
+	notify_offload_state(offload_data->offload_state);
+}
+
+static void usb_audio_vendor_connect(void *unused, struct usb_interface *intf,
+				     struct snd_usb_audio *chip)
+{
+	offload_data->offload_state = true;
+	schedule_work(&offload_data->offload_connect_ws);
+}
+
+static void usb_audio_vendor_disconnect(void *unused, struct usb_interface *intf)
+{
+	offload_data->offload_state = false;
+	schedule_work(&offload_data->offload_connect_ws);
+}
+
 static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 			    void *dev)
 {
@@ -191,6 +215,19 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 	usb_register_notify(&xhci_udev_nb);
 	offload_data->op_mode = USB_OFFLOAD_DRAM;
 	offload_data->xhci = xhci;
+
+	INIT_WORK(&offload_data->offload_connect_ws, offload_connect_work);
+
+	ret = register_trace_android_vh_audio_usb_offload_connect(usb_audio_vendor_connect, NULL);
+	if (ret)
+		dev_err(dev, "register_trace_android_vh_audio_usb_offload_connect failed: %d\n",
+			ret);
+
+	ret = register_trace_android_rvh_audio_usb_offload_disconnect(usb_audio_vendor_disconnect,
+								      NULL);
+	if (ret)
+		dev_err(dev, "register_trace_android_rvh_audio_usb_offload_disconnect failed: %d\n",
+			ret);
 
 	return 0;
 }

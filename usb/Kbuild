@@ -4,6 +4,7 @@
 #
 
 ccflags-y += -I$(srctree)/drivers/usb/host
+ccflags-y += -I$(srctree)/sound/usb
 ccflags-y += -I$(srctree)/../private/google-modules/aoc_ipc
 ccflags-y += -I$(srctree)/../private/google-modules/aoc
 ccflags-y += -I$(srctree)/../private/google-modules/soc/gs/drivers/usb/host

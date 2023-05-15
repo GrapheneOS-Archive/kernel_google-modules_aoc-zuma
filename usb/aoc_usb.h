@@ -11,6 +11,7 @@
 
 #include <linux/notifier.h>
 
+#include "usbaudio.h"
 #include "xhci.h"
 
 enum aoc_usb_msg {
