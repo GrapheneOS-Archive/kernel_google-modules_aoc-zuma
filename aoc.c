@@ -293,6 +293,10 @@ static bool aoc_disable_restart = false;
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
+static bool aoc_debug = false;
+module_param(aoc_debug, bool, 0644);
+MODULE_PARM_DESC(aoc_debug, "Enable debug mode for AoC.");
+
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
 
@@ -1628,6 +1632,8 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	rc = aoc_req_wait(prvdata, true);
 	if (rc) {
 		dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+		if (aoc_debug)
+			panic("AoC kernel panic: timed out waiting for aoc_ack");
 		return rc;
 	}
 
