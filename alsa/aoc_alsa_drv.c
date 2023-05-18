@@ -114,11 +114,15 @@ static void audio_set_isr(struct aoc_service_dev *dev)
 
 void audio_free_isr(struct aoc_service_dev *dev)
 {
-	if ( dev->mbox_index == PCM_CHANNEL || dev->mbox_index == INCALL_CHANNEL ||
-		 dev->mbox_index == HIFI_CHANNEL || dev->mbox_index == VOIP_CHANNEL) {
-		pr_notice("%s free interrupt handler\n", dev_name(&dev->dev));
-		dev->handler = NULL;
+	spin_lock(&service_lock);
+	if (dev) {
+		if (dev->mbox_index == PCM_CHANNEL || dev->mbox_index == INCALL_CHANNEL ||
+		    dev->mbox_index == HIFI_CHANNEL || dev->mbox_index == VOIP_CHANNEL) {
+			pr_notice("%s free interrupt handler\n", dev_name(&dev->dev));
+			dev->handler = NULL;
+		}
 	}
+	spin_unlock(&service_lock);
 }
 EXPORT_SYMBOL_GPL(audio_free_isr);
 
