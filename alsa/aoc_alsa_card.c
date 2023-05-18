@@ -1853,6 +1853,11 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	chip->volume = 1000;
 	chip->mute = 1;
 
+	/* Default values for incall mic gain and mute */
+	chip->incall_mic_muted = false;
+	chip->incall_mic_gain_current = 0;
+	chip->incall_mic_gain_target = 0;
+
 	mutex_init(&chip->audio_mutex);
 	mutex_init(&chip->audio_cmd_chan_mutex);
 	spin_lock_init(&chip->audio_lock);

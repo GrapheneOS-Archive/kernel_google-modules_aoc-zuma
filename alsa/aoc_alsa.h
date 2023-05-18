@@ -270,6 +270,9 @@ struct aoc_chip {
 	int chirp_mode;
 	int chre_src_gain[CHRE_GAIN_PATH_TOT];
 	int chre_src_aec_timeout;
+	int incall_mic_gain_current;
+	int incall_mic_gain_target;
+	bool incall_mic_muted;
 	uint64_t opened;
 	uint64_t capture_param_set;
 	struct mutex audio_mutex;
@@ -409,6 +412,7 @@ int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long 
 int aoc_incall_playback_mic_channel_set(struct aoc_chip *chip, int stream, long val);
 int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute);
 int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute);
+int aoc_incall_mic_gain_set(struct aoc_chip *chip, long gain);
 
 int aoc_lvm_enable_get(struct aoc_chip *chip, long *enable);
 int aoc_lvm_enable_set(struct aoc_chip *chip, long enable);

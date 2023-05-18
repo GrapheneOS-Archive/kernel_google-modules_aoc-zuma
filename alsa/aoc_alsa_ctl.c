@@ -442,6 +442,20 @@ static int incall_mic_sink_mute_ctl_set(struct snd_kcontrol *kcontrol,
 		pr_err("ERR:%d incall %s mute set to %d fail\n", err, (param == 0) ? "mic" : "sink",
 		       val);
 
+	chip->incall_mic_muted = val;
+
+	/* For incall mic only, update gain if it was set while muted */
+	if (param == 0 && val == 0) {
+		if (chip->incall_mic_gain_current != chip->incall_mic_gain_target) {
+			pr_info("Setting incall mic gain (deferred)\n");
+			err = aoc_incall_mic_gain_set(chip, val);
+			if (err < 0)
+				pr_err("ERR:%d incall mic gain set to %d fail\n", err,
+					val);
+			chip->incall_mic_gain_current = chip->incall_mic_gain_target;
+		}
+	}
+
 	mutex_unlock(&chip->audio_mutex);
 	return err;
 }
@@ -460,6 +474,49 @@ static int incall_mic_sink_mute_ctl_get(struct snd_kcontrol *kcontrol,
 	err = aoc_incall_mic_sink_mute_get(chip, param, &ucontrol->value.integer.value[0]);
 	if (err < 0)
 		pr_err("ERR:%d incall %s mute get fail\n", err, (param == 0) ? "mic" : "sink");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_mic_gain_set(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int gain, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	gain = ucontrol->value.integer.value[0];
+	chip->incall_mic_gain_target = gain;
+	if (chip->incall_mic_muted) {
+		pr_info("Tried to set incall mic gain while mic was muted, deferring.");
+		mutex_unlock(&chip->audio_mutex);
+		return err;
+	}
+
+	err = aoc_incall_mic_gain_set(chip, gain);
+	if (err < 0)
+		pr_err("ERR:%d incall mic gain set to %d fail\n", err,
+		       gain);
+
+	chip->incall_mic_gain_current = gain;
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_mic_gain_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->incall_mic_gain_current;
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -2288,6 +2345,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		       incall_mic_sink_mute_ctl_set),
 	SOC_SINGLE_EXT("Incall Sink Mute", SND_SOC_NOPM, 1, 1, 0, incall_mic_sink_mute_ctl_get,
 		       incall_mic_sink_mute_ctl_set),
+
+	/* Incall mic gain */
+	SOC_SINGLE_RANGE_EXT_TLV_modified("Incall Mic Gain (dB)", SND_SOC_NOPM,
+		0, -128, 128, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
 
 	/* Incall playback0 and playback1 mic source choice */
 	SOC_SINGLE_EXT("Incall Playback0 Mic Channel", SND_SOC_NOPM, 0, 2, 0, incall_playback_mic_channel_ctl_get,

@@ -2068,6 +2068,26 @@ int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute)
 	return 0;
 }
 
+int aoc_incall_mic_gain_set(struct aoc_chip *chip, long gain)
+{
+	int err;
+	int cmd_id, block, component, key;
+
+	cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
+	block = 19;
+	component = 0;
+	key = 6;
+
+	/* Send cmd to AOC */
+	err = aoc_audio_set_parameters(cmd_id, block, component, key, (int) gain, chip);
+	if (err < 0) {
+		pr_err("ERR:%d in incall mic mute set\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
 /* can we get dB gain directly */
 int aoc_mic_record_gain_get(struct aoc_chip *chip, long *val)
 {
