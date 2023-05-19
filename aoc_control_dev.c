@@ -567,13 +567,19 @@ static struct attribute *aoc_stats_attrs[] = {
 	&dev_attr_memory_exception.attr,
 	&dev_attr_memory_votes_a32.attr,
 	&dev_attr_memory_votes_ff1.attr,
+	NULL
+};
+
+ATTRIBUTE_GROUPS(aoc_stats);
+
+static struct attribute *aoc_control_attrs[] = {
 	&dev_attr_udfps_set_clock_source.attr,
 	&dev_attr_udfps_get_osc_freq.attr,
 	&dev_attr_udfps_get_disp_freq.attr,
 	NULL
 };
 
-ATTRIBUTE_GROUPS(aoc_stats);
+ATTRIBUTE_GROUPS(aoc_control);
 
 static int aoc_control_map_handler(u32 handle, phys_addr_t p, size_t size,
 				    bool mapped, void *ctx)
@@ -670,6 +676,7 @@ static int aoc_control_probe(struct aoc_service_dev *sd)
 {
 	struct device *dev = &sd->dev;
 	struct stats_prvdata *prvdata;
+	int ret;
 
 	pr_debug("probe service with name %s\n", dev_name(dev));
 
@@ -681,6 +688,10 @@ static int aoc_control_probe(struct aoc_service_dev *sd)
 
 	INIT_WORK(&prvdata->discovery_work, discovery_workitem);
 	dev_set_drvdata(dev, prvdata);
+
+	ret = device_add_groups(dev, aoc_control_groups);
+	if (ret)
+		dev_err(dev, "Failed to add device groups\n");
 
 	schedule_work(&prvdata->discovery_work);
 
@@ -697,6 +708,7 @@ static int aoc_control_remove(struct aoc_service_dev *sd)
 	cancel_work_sync(&prvdata->discovery_work);
 
 	device_remove_groups(dev, aoc_stats_groups);
+	device_remove_groups(dev, aoc_control_groups);
 
 	aoc_remove_map_handler(prvdata->service);
 
