@@ -2554,6 +2554,16 @@ static irqreturn_t watchdog_int_handler(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static int compute_section_offset(struct aoc_ramdump_header *ramdump_header, int section_index)
+{
+	int i, crash_info_section_offset = RAMDUMP_SECTION_SRAM_OFFSET;
+
+	for (i = 0; i < section_index; i++)
+		crash_info_section_offset += ramdump_header->sections[i].size;
+
+	return crash_info_section_offset;
+}
+
 static void aoc_watchdog(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -2578,6 +2588,8 @@ static void aoc_watchdog(struct work_struct *work)
 	int restart_rc;
 	u32 section_flags;
 	bool ap_reset = false;
+	int crash_info_section_offset = compute_section_offset(ramdump_header,
+		RAMDUMP_SECTION_CRASH_INFO_INDEX);
 
 	prvdata->total_restarts++;
 
@@ -2633,7 +2645,7 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (!ramdump_header->valid) {
 		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+			crash_info_section_offset;
 		bool crash_reason_valid = (strnlen(crash_reason,
 			sizeof(crash_info)) != 0);
 
@@ -2670,7 +2682,7 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (ramdump_header->valid) {
 		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
+			crash_info_section_offset;
 
 		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
 		if (section_flags & RAMDUMP_FLAG_VALID) {
