@@ -2593,7 +2593,7 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	bool ap_reset = false;
+	bool ap_reset = false, invalid_magic;
 	struct aoc_section_header *crash_info_section =
 		find_ramdump_section(ramdump_header, SECTION_TYPE_CRASH_INFO);
 
@@ -2669,7 +2669,8 @@ static void aoc_watchdog(struct work_struct *work)
 		}
 	}
 
-	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
+	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
+	if (ramdump_header->valid && invalid_magic) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
@@ -2693,7 +2694,7 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 
-	if (ramdump_header->valid) {
+	if (ramdump_header->valid && !invalid_magic) {
 		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
 			const char *crash_reason = (const char *)ramdump_header +
 				crash_info_section->offset;
