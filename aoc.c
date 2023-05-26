@@ -324,7 +324,7 @@ struct aoc_client {
 	int endpoint;
 };
 
-static bool write_reset_trampoline(u32 addr);
+static bool write_reset_trampoline(const struct firmware *fw);
 static bool aoc_a32_release_from_reset(void);
 static bool configure_dmic_regulator(struct aoc_prvdata *prvdata, bool enable);
 static bool configure_sensor_regulator(struct aoc_prvdata *prvdata, bool enable);
@@ -824,7 +824,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	const char *version;
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
-	u32 ipc_offset, bootloader_offset;
+	u32 ipc_offset;
 
 	if ((dt_prevent_aoc_load) && (!first_load_prevented)) {
 		dev_err(dev, "DTS settings prevented AoC firmware from being loaded\n");
@@ -864,7 +864,6 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	}
 
 	ipc_offset = _aoc_fw_ipc_offset(fw);
-	bootloader_offset = _aoc_fw_bootloader_offset(fw);
 	version = _aoc_fw_version(fw);
 
 	prvdata->firmware_version = devm_kasprintf(dev, GFP_KERNEL, "%s", version);
@@ -921,11 +920,11 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 			}
 		} else {
 			aoc_configure_sysmmu(prvdata, fw);
-			write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
+			write_reset_trampoline(fw);
 		}
 	} else {
 		aoc_configure_sysmmu_manual(prvdata);
-		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
+		write_reset_trampoline(fw);
 	}
 
 	aoc_pass_fw_information(aoc_dram_translate(prvdata, ipc_offset),
@@ -1503,88 +1502,21 @@ wait_queue_head_t *aoc_service_get_write_queue(struct aoc_service_dev *dev)
 }
 EXPORT_SYMBOL_GPL(aoc_service_get_write_queue);
 
-static bool write_reset_trampoline(u32 addr)
+static bool write_reset_trampoline(const struct firmware *fw)
 {
-	u32 *reset;
-	u32 instructions[] = {
-		/* <start>: */
-		/*  0: */  0xe59f004c,  /* ldr     r0, [pc, #76]   ; 54 <.PCU_SLC_MIF_REQ_ADDR> */
-		/*  4: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 58 <.PCU_SLC_MIF_REQ_VALUE> */
-		/*  8: */  0xe5801000,  /* str     r1, [r0] */
-		/*  c: */  0xe59f0048,  /* ldr     r0, [pc, #72]   ; 5c <.PCU_SLC_MIF_ACK_ADDR> */
-		/* 10: */  0xe59f104c,  /* ldr     r1, [pc, #76]   ; 64 <.PCU_SLC_MIF_ACK_VALUE> */
-		/* 14: */  0xe59f2044,  /* ldr     r2, [pc, #68]   ; 60 <.PCU_SLC_MIF_ACK_MASK> */
-
-		/* <mif_ack_loop>: */
-		/* 18: */  0xe5903000,  /* ldr     r3, [r0] */
-		/* 1c: */  0xe0033002,  /* and     r3, r3, r2 */
-		/* 20: */  0xe1530001,  /* cmp     r3, r1 */
-		/* 24: */  0x1afffffb,  /* bne     18 <mif_ack_loop> */
-
-		/* 28: */  0xe59f0038,  /* ldr     r0, [pc, #56]   ; 68 <.PCU_BLK_PWR_REQ_ADDR> */
-		/* 2c: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 6c <.PCU_BLK_PWR_REQ_VALUE> */
-		/* 30: */  0xe5801000,  /* str     r1, [r0] */
-		/* 34: */  0xe59f0034,  /* ldr     r0, [pc, #52]   ; 70 <.PCU_BLK_PWR_ACK_ADDR> */
-		/* 38: */  0xe59f1038,  /* ldr     r1, [pc, #56]   ; 78 <.PCU_BLK_PWR_ACK_VALUE> */
-		/* 3c: */  0xe59f2030,  /* ldr     r2, [pc, #48]   ; 74 <.PCU_BLK_PWR_ACK_MASK> */
-
-		/* <blk_aoc_on_loop>: */
-		/* 40: */  0xe5903000,  /* ldr     r3, [r0] */
-		/* 44: */  0xe0033002,  /* and     r3, r3, r2 */
-		/* 48: */  0xe1530001,  /* cmp     r3, r1 */
-		/* 4c: */  0x1afffffb,  /* bne     40 <blk_aoc_on_loop> */
-		/* 50: */  0xe59ff024,  /* ldr     pc, [pc, #36]   ; 7c <.BOOTLOADER_START_ADDR> */
-
-
-		#if IS_ENABLED(CONFIG_SOC_GS201)
-		  /* .PCU_SLC_MIF_REQ_ADDR:  */  0xA08000,
-		  /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
-		  /* .PCU_SLC_MIF_ACK_ADDR:  */  0xA08004,
-		  /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
-		  /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
-
-		  /* .PCU_BLK_PWR_REQ_ADDR:  */  0xA0103C,
-		  /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
-		  /* .PCU_BLK_PWR_ACK_ADDR:  */  0xA0103C,
-		  /* .PCU_BLK_PWR_ACK_MASK:  */  0x00001C,  /* POWER_MODE field is bits 3:2 */
-		  /* .PCU_BLK_PWR_ACK_VALUE: */  0x000014,  /* POWER_MODE = On, 0x1 (<< 2) */
-		#elif IS_ENABLED(CONFIG_SOC_GS101)
-		  /* .PCU_SLC_MIF_REQ_ADDR:  */  0xB0819C,
-		  /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
-		  /* .PCU_SLC_MIF_ACK_ADDR:  */  0xB0819C,
-		  /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
-		  /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
-
-		  /* .PCU_BLK_PWR_REQ_ADDR:  */  0xB02004,
-		  /* .PCU_BLK_PWR_REQ_VALUE: */  0x000004,  /* BLK_AOC = Initiate Wakeup Sequence, 0x1 (<< 2) */
-		  /* .PCU_BLK_PWR_ACK_ADDR:  */  0xB02000,
-		  /* .PCU_BLK_PWR_ACK_MASK:  */  0x000004,  /* BLK_AOC field is bit 2 */
-		  /* .PCU_BLK_PWR_ACK_VALUE: */  0x000004,  /* BLK_AOC = Active, 0x1 (<< 2) */
-		#elif IS_ENABLED(CONFIG_SOC_ZUMA)
-		  /* .PCU_SLC_MIF_REQ_ADDR:  */ 0x1409000,
-		  /* .PCU_SLC_MIF_REQ_VALUE: */  0x000003,  /* Set ACTIVE_REQUEST = 1, MIS_SLCn = 1 to request MIF access */
-		  /* .PCU_SLC_MIF_ACK_ADDR:  */ 0x1409004,
-		  /* .PCU_SLC_MIF_ACK_MASK:  */  0x000002,  /* MIF_ACK field is bit 1 */
-		  /* .PCU_SLC_MIF_ACK_VALUE: */  0x000002,  /* MIF_ACK = ACK, 0x1 (<< 1) */
-
-		  /* .PCU_BLK_PWR_REQ_ADDR:  */ 0x140200C,
-		  /* .PCU_BLK_PWR_REQ_VALUE: */  0x000001,  /* POWER_REQUEST = On, 0x1 (<< 0) */
-		  /* .PCU_BLK_PWR_ACK_ADDR:  */ 0x140200C,
-		  /* .PCU_BLK_PWR_ACK_MASK:  */  0x00001C,  /* POWER_MODE field is bits 3:2 */
-		  /* .PCU_BLK_PWR_ACK_VALUE: */  0x000014,  /* POWER_MODE = On, 0x1 (<< 2) */
-		#else
-		    #error "Unsupported silicon"
-		#endif
-		/* .BOOTLOADER_START_ADDR: */  addr,
-	};
-
-	pr_notice("writing reset trampoline to addr %#x\n", addr);
+	u32 *reset, bl_size;
+	u32 *bootloader;
 
 	reset = aoc_sram_translate(0);
 	if (!reset)
 		return false;
 
-	memcpy_toio(reset, instructions, sizeof(instructions));
+	bl_size = _aoc_fw_bl_size(fw);
+	bootloader = _aoc_fw_bl(fw);
+
+	pr_notice("writing reset trampoline to addr %#x\n",
+		bootloader[bl_size / sizeof(u32) - 1]);
+	memcpy_toio(reset, bootloader, bl_size);
 
 	return true;
 }
