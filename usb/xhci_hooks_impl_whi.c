@@ -137,14 +137,18 @@ static void offload_connect_work(struct work_struct *work)
 static void usb_audio_vendor_connect(void *unused, struct usb_interface *intf,
 				     struct snd_usb_audio *chip)
 {
-	offload_data->offload_state = true;
-	schedule_work(&offload_data->offload_connect_ws);
+	if (offload_data) {
+		offload_data->offload_state = true;
+		schedule_work(&offload_data->offload_connect_ws);
+	}
 }
 
 static void usb_audio_vendor_disconnect(void *unused, struct usb_interface *intf)
 {
-	offload_data->offload_state = false;
-	schedule_work(&offload_data->offload_connect_ws);
+	if (offload_data) {
+		offload_data->offload_state = false;
+		schedule_work(&offload_data->offload_connect_ws);
+	}
 }
 
 static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
@@ -218,17 +222,6 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 
 	INIT_WORK(&offload_data->offload_connect_ws, offload_connect_work);
 
-	ret = register_trace_android_vh_audio_usb_offload_connect(usb_audio_vendor_connect, NULL);
-	if (ret)
-		dev_err(dev, "register_trace_android_vh_audio_usb_offload_connect failed: %d\n",
-			ret);
-
-	ret = register_trace_android_rvh_audio_usb_offload_disconnect(usb_audio_vendor_disconnect,
-								      NULL);
-	if (ret)
-		dev_err(dev, "register_trace_android_rvh_audio_usb_offload_disconnect failed: %d\n",
-			ret);
-
 	return 0;
 }
 
@@ -267,5 +260,16 @@ static struct xhci_exynos_ops offload_ops = {
 
 int xhci_offload_helper_init(void)
 {
+	int ret;
+
+	ret = register_trace_android_vh_audio_usb_offload_connect(usb_audio_vendor_connect, NULL);
+	if (ret)
+		pr_err("register_trace_android_vh_audio_usb_offload_connect failed: %d\n", ret);
+
+	ret = register_trace_android_rvh_audio_usb_offload_disconnect(usb_audio_vendor_disconnect,
+								      NULL);
+	if (ret)
+		pr_err("register_trace_android_rvh_audio_usb_offload_disconnect failed: %d\n", ret);
+
 	return xhci_exynos_register_offload_ops(&offload_ops);
 }
