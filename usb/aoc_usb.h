@@ -81,6 +81,7 @@ int xhci_sync_conn_stat(unsigned int bus_id, unsigned int dev_num, unsigned int 
 			       unsigned int conn_stat);
 int usb_host_mode_state_notify(enum aoc_usb_state usb_state);
 int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring);
+int xhci_get_usb_audio_count(void);
 
 bool is_aoc_usb_probe_done(void);
 
