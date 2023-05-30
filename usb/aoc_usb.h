@@ -86,7 +86,11 @@ int xhci_get_usb_audio_count(void);
 bool is_aoc_usb_probe_done(void);
 
 int xhci_offload_helper_init(void);
+int usb_vendor_helper_init(void);
 
 extern int dwc3_otg_host_enable(bool enabled);
+
+extern bool aoc_alsa_usb_capture_enabled(void);
+extern bool aoc_alsa_usb_playback_enabled(void);
 
 #endif /* __LINUX_AOC_USB_H */
