@@ -99,6 +99,7 @@ void usb_audio_offload_suspend(struct usb_interface *intf, pm_message_t message)
 int aoc_set_usb_mem_config(struct aoc_chip *achip)
 {
 	struct usb_host_endpoint *ep;
+	struct usb_host_endpoint *fb_ep;
 	struct snd_usb_substream *subs;
 	struct snd_usb_audio *chip;
 	int card_num;
@@ -142,6 +143,20 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 		} else {
 			pr_info("%s call aoc_alsa_usb_callback_register() first, skip", __func__);
 		}
+
+		if (subs->sync_endpoint) {
+			fb_ep = usb_pipe_endpoint(subs->dev, subs->sync_endpoint->pipe);
+			if (!fb_ep) {
+				pr_info("%s sync ep # %d context is null\n",
+						__func__, subs->sync_endpoint->ep_num);
+			} else {
+				if (cb_func) {
+					cb_func(subs->dev, fb_ep);
+				}
+				aoc_set_usb_feedback_endpoint(achip, subs->dev, fb_ep);
+			}
+		}
+
 		mutex_unlock(&chip->mutex);
 	}
 
