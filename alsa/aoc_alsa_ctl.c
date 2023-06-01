@@ -432,27 +432,36 @@ static int incall_mic_sink_mute_ctl_set(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
 	int param = mc->shift;
 	int val, err = 0;
+	int new_gain = 0;
+	int is_mic = param == INCALL_MIC_ID;
 
 	if (mutex_lock_interruptible(&chip->audio_mutex))
 		return -EINTR;
 
 	val = ucontrol->value.integer.value[0];
-	err = aoc_incall_mic_sink_mute_set(chip, param, val);
-	if (err < 0)
-		pr_err("ERR:%d incall %s mute set to %d fail\n", err, (param == 0) ? "mic" : "sink",
-		       val);
 
-	chip->incall_mic_muted = val;
+	/* Incall mic supports mute and unmute with gain
+	 * Incall sink only supports mute and unmute with 0dB gain */
 
-	/* For incall mic only, update gain if it was set while muted */
-	if (param == 0 && val == 0) {
-		if (chip->incall_mic_gain_current != chip->incall_mic_gain_target) {
-			pr_info("Setting incall mic gain (deferred)\n");
-			err = aoc_incall_mic_gain_set(chip, val);
-			if (err < 0)
-				pr_err("ERR:%d incall mic gain set to %d fail\n", err,
-					val);
-			chip->incall_mic_gain_current = chip->incall_mic_gain_target;
+	if (val == INCALL_MUTE) /* Mute incall mic or sink */
+		new_gain = MUTE_DB;
+	else /* Unmute sets mic's gain to the last set target or UNMUTE_DB for sink */
+		new_gain = is_mic ? chip->incall_mic_gain_target : UNMUTE_DB;
+
+	/* For incall mic: only update gain if gain is different to current value
+	 * For incall sink: always update gain to either UNMUTE_DB or MUTE_DB */
+	if (new_gain != chip->incall_mic_gain_current || !is_mic) {
+		err = aoc_incall_mic_gain_set(chip, param, new_gain);
+
+		if (err < 0) {
+			pr_err("ERR:%d incall mic gain set to %ddB fail\n", err, new_gain);
+			mutex_unlock(&chip->audio_mutex);
+			return err;
+		}
+
+		if (is_mic) {
+			chip->incall_mic_muted = val;
+			chip->incall_mic_gain_current = new_gain;
 		}
 	}
 
@@ -496,7 +505,7 @@ static int incall_mic_gain_set(struct snd_kcontrol *kcontrol,
 		return err;
 	}
 
-	err = aoc_incall_mic_gain_set(chip, gain);
+	err = aoc_incall_mic_gain_set(chip, INCALL_MIC_ID, gain);
 	if (err < 0)
 		pr_err("ERR:%d incall mic gain set to %d fail\n", err,
 		       gain);
@@ -2348,7 +2357,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	/* Incall mic gain */
 	SOC_SINGLE_RANGE_EXT_TLV_modified("Incall Mic Gain (dB)", SND_SOC_NOPM,
-		0, -128, 128, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
+		0, -300, 30, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
 
 	/* Incall playback0 and playback1 mic source choice */
 	SOC_SINGLE_EXT("Incall Playback0 Mic Channel", SND_SOC_NOPM, 0, 2, 0, incall_playback_mic_channel_ctl_get,
