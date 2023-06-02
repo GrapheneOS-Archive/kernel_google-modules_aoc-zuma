@@ -309,6 +309,7 @@ static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
 static void aoc_bus_remove(struct device *dev);
 
+static void aoc_configure_sysmmu_fault_handler(struct aoc_prvdata *p);
 static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw);
 static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p);
 
@@ -912,8 +913,10 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	if (fw_signed) {
 		if (gsa_enabled) {
-			int rc = aoc_fw_authenticate(prvdata, fw);
+			int rc;
 
+			aoc_configure_sysmmu_fault_handler(prvdata);
+			rc = aoc_fw_authenticate(prvdata, fw);
 			if (rc) {
 				dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
 				goto free_fw;
@@ -2198,6 +2201,15 @@ static inline void aoc_configure_ssmt( struct platform_device *pdev
 	__attribute__((unused))) { }
 #endif
 
+static void aoc_configure_sysmmu_fault_handler(struct aoc_prvdata *p)
+{
+	struct device *dev = p->dev;
+	int rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
+
+	if (rc)
+		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
+}
+
 static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw)
 {
 	int rc;
@@ -2207,9 +2219,7 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *f
 	struct device *dev = p->dev;
 	u16 sysmmu_offset, sysmmu_size;
 
-	rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
-	if (rc)
-		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
+	aoc_configure_sysmmu_fault_handler(p);
 
 	dev_info(dev, "Setting up SysMMU\n");
 	sysmmu_offset = _aoc_fw_sysmmu_offset(fw);
@@ -2234,13 +2244,10 @@ static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p)
 {
 // TODO(alexiacobucci): remove this once build scripts are updated to sign image
 #if IS_ENABLED(CONFIG_SOC_ZUMA)
-	int rc;
 	struct iommu_domain *domain = p->domain;
 	struct device *dev = p->dev;
 
-	rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
-	if (rc)
-		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
+	aoc_configure_sysmmu_fault_handler(p);
 
 	/* Map in the AoC carveout */
 	if (iommu_map(domain, 0x98000000, p->dram_resource.start, p->dram_size,
