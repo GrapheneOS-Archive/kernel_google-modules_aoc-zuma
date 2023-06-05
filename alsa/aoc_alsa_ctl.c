@@ -23,10 +23,6 @@
 #define COMPRE_OFFLOAD_GAIN_MIN 0
 #define COMPRE_OFFLOAD_GAIN_MAX 8388608 /* 2^23 = 8388608 */
 
-#define AOC_CHIRP_INTERVAL_KEY 0
-#define AOC_CHIRP_ENABLE_KEY 1
-#define AOC_CHIRP_MODE_KEY 2
-
 /*
  * Redefined the macro from soc.h so that the control value can be negative.
  * In orginal definition, xmin can be a negative value,  but the min control
@@ -1826,7 +1822,7 @@ static int aoc_audio_chirp_enable_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_enable = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_ENABLE_KEY, chip->chirp_enable);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_ENABLE, chip->chirp_enable);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1856,7 +1852,7 @@ static int aoc_audio_chirp_interval_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_interval = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_INTERVAL_KEY, chip->chirp_interval);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_INTERVAL, chip->chirp_interval);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1886,7 +1882,7 @@ static int aoc_audio_chirp_mode_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_mode = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_MODE_KEY, chip->chirp_mode);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_MODE, chip->chirp_mode);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1901,6 +1897,36 @@ static int aoc_audio_chirp_mode_get(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	ucontrol->value.integer.value[0] = chip->chirp_mode;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_chirp_gain_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chirp_gain = ucontrol->value.integer.value[0];
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_GAIN, chip->chirp_gain);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int aoc_audio_chirp_gain_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chirp_gain;
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -2468,6 +2494,8 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		0, 20, 200, 0, aoc_audio_chirp_interval_get, aoc_audio_chirp_interval_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Mode", SND_SOC_NOPM,
 		0, 0, 10, 0, aoc_audio_chirp_mode_get, aoc_audio_chirp_mode_set, NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Gain (cB)", SND_SOC_NOPM,
+		0, -3000, 300, 0, aoc_audio_chirp_gain_get, aoc_audio_chirp_gain_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC PDM Gain (cB)", SND_SOC_NOPM,
 		CHRE_GAIN_PATH_PDM, -1280, 1280, 0, aoc_audio_chre_src_gain_get, aoc_audio_chre_src_gain_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC AEC Gain (cB)", SND_SOC_NOPM,
