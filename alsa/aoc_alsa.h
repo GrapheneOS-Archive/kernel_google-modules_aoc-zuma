@@ -223,6 +223,8 @@ enum { INCALL_CHANNEL = 5, PCM_CHANNEL = 20, HIFI_CHANNEL, VOIP_CHANNEL};
 
 enum { CHRE_GAIN_PATH_PDM = 0, CHRE_GAIN_PATH_AEC, CHRE_GAIN_PATH_TOT };
 
+enum { AOC_CHIRP_INTERVAL = 0, AOC_CHIRP_ENABLE, AOC_CHIRP_MODE, AOC_CHIRP_GAIN };
+
 struct aoc_chip {
 	struct snd_card *card;
 	struct snd_soc_jack jack; /* TODO: temporary use, need refactor  */
@@ -276,6 +278,7 @@ struct aoc_chip {
 	int chirp_enable;
 	int chirp_interval;
 	int chirp_mode;
+	int chirp_gain;
 	int chre_src_gain[CHRE_GAIN_PATH_TOT];
 	int chre_src_aec_timeout;
 	int incall_mic_gain_current;
