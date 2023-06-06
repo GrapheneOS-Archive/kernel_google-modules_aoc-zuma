@@ -294,6 +294,7 @@ struct aoc_alsa_stream {
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
 	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
 	int isr_type; /* timer, interrupt */
+	atomic_t cancel_work_active;
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
