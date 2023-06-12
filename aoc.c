@@ -293,9 +293,9 @@ static bool aoc_disable_restart = false;
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
-static bool aoc_debug = false;
-module_param(aoc_debug, bool, 0644);
-MODULE_PARM_DESC(aoc_debug, "Enable debug mode for AoC.");
+static bool aoc_panic_on_req_timeout = true;
+module_param(aoc_panic_on_req_timeout, bool, 0644);
+MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when aoc_req times out.");
 
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
@@ -1550,7 +1550,7 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	const u32 aoc_watchdog_control_ssr = 0x3F;
 	const unsigned int custom_in_offset = 0x3AC4;
 	const unsigned int custom_out_offset = 0x3AC0;
-	int rc;
+	int aoc_req_rc, rc;
 	void __iomem *pcu;
 	unsigned int custom_in;
 	unsigned int custom_out;
@@ -1562,16 +1562,6 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	if (!pcu)
 		return -ENODEV;
 
-	dev_info(prvdata->dev, "asserting aoc_req\n");
-	aoc_req_assert(prvdata, true);
-	rc = aoc_req_wait(prvdata, true);
-	if (rc) {
-		dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
-		if (aoc_debug)
-			panic("AoC kernel panic: timed out waiting for aoc_ack");
-		return rc;
-	}
-
 	if (aoc_disable_restart) {
 		return AOC_RESTART_DISABLED_RC;
 	}
@@ -1580,6 +1570,13 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
 	disable_irq_nosync(prvdata->sysmmu_secure_irq);
 	for (i = 0; i < aoc_reset_tries; i++) {
+		dev_info(prvdata->dev, "asserting aoc_req\n");
+		aoc_req_assert(prvdata, true);
+		aoc_req_rc = aoc_req_wait(prvdata, true);
+		if (aoc_req_rc) {
+			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+			continue;
+		}
 		dev_info(prvdata->dev, "resetting aoc\n");
 		writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
 		if ((readl(pcu + AOC_PCU_WATCHDOG_CONTROL_OFFSET) &
@@ -1607,6 +1604,12 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 			break;
 		}
 	}
+
+	if (aoc_req_rc && aoc_panic_on_req_timeout) {
+		dev_err(prvdata->dev, "timed out too many times waiting for aoc_ack, triggering kernel panic\n");
+		panic("AoC kernel panic: timed out waiting for aoc_ack");
+	}
+
 	enable_irq(prvdata->sysmmu_nonsecure_irq);
 	enable_irq(prvdata->sysmmu_secure_irq);
 	if (!aoc_reset_successful) {
@@ -2561,8 +2564,12 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		/* wakeup AOC before calling GSA */
 		aoc_req_assert(prvdata, true);
 		rc = aoc_req_wait(prvdata, true);
-		if (rc)
+		if (rc) {
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+			if (prvdata->protected_by_gsa)
+				dev_err(prvdata->dev, "skipping GSA commands");
+			return;
+		}
 	}
 
 	if(prvdata->protected_by_gsa) {
