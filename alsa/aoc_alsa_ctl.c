@@ -23,10 +23,6 @@
 #define COMPRE_OFFLOAD_GAIN_MIN 0
 #define COMPRE_OFFLOAD_GAIN_MAX 8388608 /* 2^23 = 8388608 */
 
-#define AOC_CHIRP_INTERVAL_KEY 0
-#define AOC_CHIRP_ENABLE_KEY 1
-#define AOC_CHIRP_MODE_KEY 2
-
 /*
  * Redefined the macro from soc.h so that the control value can be negative.
  * In orginal definition, xmin can be a negative value,  but the min control
@@ -432,27 +428,36 @@ static int incall_mic_sink_mute_ctl_set(struct snd_kcontrol *kcontrol,
 	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
 	int param = mc->shift;
 	int val, err = 0;
+	int new_gain = 0;
+	int is_mic = param == INCALL_MIC_ID;
 
 	if (mutex_lock_interruptible(&chip->audio_mutex))
 		return -EINTR;
 
 	val = ucontrol->value.integer.value[0];
-	err = aoc_incall_mic_sink_mute_set(chip, param, val);
-	if (err < 0)
-		pr_err("ERR:%d incall %s mute set to %d fail\n", err, (param == 0) ? "mic" : "sink",
-		       val);
 
-	chip->incall_mic_muted = val;
+	/* Incall mic supports mute and unmute with gain
+	 * Incall sink only supports mute and unmute with 0dB gain */
 
-	/* For incall mic only, update gain if it was set while muted */
-	if (param == 0 && val == 0) {
-		if (chip->incall_mic_gain_current != chip->incall_mic_gain_target) {
-			pr_info("Setting incall mic gain (deferred)\n");
-			err = aoc_incall_mic_gain_set(chip, val);
-			if (err < 0)
-				pr_err("ERR:%d incall mic gain set to %d fail\n", err,
-					val);
-			chip->incall_mic_gain_current = chip->incall_mic_gain_target;
+	if (val == INCALL_MUTE) /* Mute incall mic or sink */
+		new_gain = MUTE_DB;
+	else /* Unmute sets mic's gain to the last set target or UNMUTE_DB for sink */
+		new_gain = is_mic ? chip->incall_mic_gain_target : UNMUTE_DB;
+
+	/* For incall mic: only update gain if gain is different to current value
+	 * For incall sink: always update gain to either UNMUTE_DB or MUTE_DB */
+	if (new_gain != chip->incall_mic_gain_current || !is_mic) {
+		err = aoc_incall_mic_gain_set(chip, param, new_gain);
+
+		if (err < 0) {
+			pr_err("ERR:%d incall mic gain set to %ddB fail\n", err, new_gain);
+			mutex_unlock(&chip->audio_mutex);
+			return err;
+		}
+
+		if (is_mic) {
+			chip->incall_mic_muted = val;
+			chip->incall_mic_gain_current = new_gain;
 		}
 	}
 
@@ -496,7 +501,7 @@ static int incall_mic_gain_set(struct snd_kcontrol *kcontrol,
 		return err;
 	}
 
-	err = aoc_incall_mic_gain_set(chip, gain);
+	err = aoc_incall_mic_gain_set(chip, INCALL_MIC_ID, gain);
 	if (err < 0)
 		pr_err("ERR:%d incall mic gain set to %d fail\n", err,
 		       gain);
@@ -1817,7 +1822,7 @@ static int aoc_audio_chirp_enable_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_enable = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_ENABLE_KEY, chip->chirp_enable);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_ENABLE, chip->chirp_enable);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1847,7 +1852,7 @@ static int aoc_audio_chirp_interval_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_interval = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_INTERVAL_KEY, chip->chirp_interval);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_INTERVAL, chip->chirp_interval);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1877,7 +1882,7 @@ static int aoc_audio_chirp_mode_set(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	chip->chirp_mode = ucontrol->value.integer.value[0];
-	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_MODE_KEY, chip->chirp_mode);
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_MODE, chip->chirp_mode);
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -1892,6 +1897,36 @@ static int aoc_audio_chirp_mode_get(struct snd_kcontrol *kcontrol,
 		return -EINTR;
 
 	ucontrol->value.integer.value[0] = chip->chirp_mode;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_audio_chirp_gain_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->chirp_gain = ucontrol->value.integer.value[0];
+	err = aoc_audio_set_chirp_parameter(chip, AOC_CHIRP_GAIN, chip->chirp_gain);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int aoc_audio_chirp_gain_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->chirp_gain;
 
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
@@ -2348,7 +2383,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	/* Incall mic gain */
 	SOC_SINGLE_RANGE_EXT_TLV_modified("Incall Mic Gain (dB)", SND_SOC_NOPM,
-		0, -128, 128, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
+		0, -300, 30, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
 
 	/* Incall playback0 and playback1 mic source choice */
 	SOC_SINGLE_EXT("Incall Playback0 Mic Channel", SND_SOC_NOPM, 0, 2, 0, incall_playback_mic_channel_ctl_get,
@@ -2459,6 +2494,8 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		0, 20, 200, 0, aoc_audio_chirp_interval_get, aoc_audio_chirp_interval_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Mode", SND_SOC_NOPM,
 		0, 0, 10, 0, aoc_audio_chirp_mode_get, aoc_audio_chirp_mode_set, NULL),
+	SOC_SINGLE_RANGE_EXT_TLV_modified("AoC Chirp Gain (cB)", SND_SOC_NOPM,
+		0, -3000, 300, 0, aoc_audio_chirp_gain_get, aoc_audio_chirp_gain_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC PDM Gain (cB)", SND_SOC_NOPM,
 		CHRE_GAIN_PATH_PDM, -1280, 1280, 0, aoc_audio_chre_src_gain_get, aoc_audio_chre_src_gain_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC AEC Gain (cB)", SND_SOC_NOPM,

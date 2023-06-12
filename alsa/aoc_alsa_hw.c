@@ -2010,18 +2010,18 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 	int err;
 	int cmd_id, block, component, key, value;
 
-	if (param == 0) /* Up link (mic) */
+	if (param == INCALL_MIC_ID) /* Up link (mic) */
 	{
 		cmd_id = CMD_AUDIO_OUTPUT_GET_PARAMETER_ID;
 		block = 19;
 		component = 0;
-		key = 6;
+		key = 16;
 	} else /* Download link (sink) */
 	{
 		cmd_id = CMD_AUDIO_OUTPUT_GET_PARAMETER_ID;
 		block = 19;
 		component = 30;
-		key = 6;
+		key = 16;
 	}
 
 	/* Send cmd to AOC */
@@ -2032,56 +2032,29 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 	}
 
 	if (mute)
-		*mute = (value == FLOAT_ZERO) ? 1 : 0;
+		*mute = (value <= MUTE_DB) ? INCALL_MUTE : INCALL_UNMUTE;
 
 	return 0;
 }
 
-int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute)
-{
-	int err;
-	int cmd_id, block, component, key, value;
-
-	if (param == 0) /* Up link (mic) */
-	{
-		cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
-		block = 19;
-		component = 0;
-		key = 6;
-	} else /* Download link (sink) */
-	{
-		cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
-		block = 19;
-		component = 30;
-		key = 6;
-	}
-
-	value = mute ? FLOAT_ZERO : FLOAT_ONE;
-
-	/* Send cmd to AOC */
-	err = aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
-	if (err < 0) {
-		pr_err("ERR:%d in incall mute set\n", err);
-		return err;
-	}
-
-	return 0;
-}
-
-int aoc_incall_mic_gain_set(struct aoc_chip *chip, long gain)
+int aoc_incall_mic_gain_set(struct aoc_chip *chip, int param, long gain)
 {
 	int err;
 	int cmd_id, block, component, key;
 
 	cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
 	block = 19;
-	component = 0;
-	key = 6;
+	key = 16;
+
+	if (param == INCALL_MIC_ID) /* Up link (mic) */
+		component = 0;
+	else /* Download link (sink) */
+		component = 30;
 
 	/* Send cmd to AOC */
 	err = aoc_audio_set_parameters(cmd_id, block, component, key, (int) gain, chip);
 	if (err < 0) {
-		pr_err("ERR:%d in incall mic mute set\n", err);
+		pr_err("ERR:%d in incall mic gain set\n", err);
 		return err;
 	}
 

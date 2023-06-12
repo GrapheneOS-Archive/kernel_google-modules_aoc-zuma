@@ -106,8 +106,16 @@ enum uc_device_id {
 #define SIDETONE_BIQUAD_PARAM_MIN S32_MIN
 #define SIDETONE_BIQUAD_PARAM_MAX S32_MAX
 
+#define INCALL_MIC_ID 0
+#define INCALL_SINK_ID 1
+#define INCALL_MUTE 1
+#define INCALL_UNMUTE 0
+
 #define FLOAT_ZERO	0x00000000
 #define FLOAT_ONE	0x3f800000
+
+#define MUTE_DB -300
+#define UNMUTE_DB 0
 
 #define alsa2chip(vol) (vol) /* Convert alsa to chip volume */
 #define chip2alsa(vol) (vol) /* Convert chip to alsa volume */
@@ -215,6 +223,8 @@ enum { INCALL_CHANNEL = 5, PCM_CHANNEL = 20, HIFI_CHANNEL, VOIP_CHANNEL};
 
 enum { CHRE_GAIN_PATH_PDM = 0, CHRE_GAIN_PATH_AEC, CHRE_GAIN_PATH_TOT };
 
+enum { AOC_CHIRP_INTERVAL = 0, AOC_CHIRP_ENABLE, AOC_CHIRP_MODE, AOC_CHIRP_GAIN };
+
 struct aoc_chip {
 	struct snd_card *card;
 	struct snd_soc_jack jack; /* TODO: temporary use, need refactor  */
@@ -268,6 +278,7 @@ struct aoc_chip {
 	int chirp_enable;
 	int chirp_interval;
 	int chirp_mode;
+	int chirp_gain;
 	int chre_src_gain[CHRE_GAIN_PATH_TOT];
 	int chre_src_aec_timeout;
 	int incall_mic_gain_current;
@@ -312,6 +323,7 @@ struct aoc_alsa_stream {
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
 	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
 	int isr_type; /* timer, interrupt */
+	atomic_t cancel_work_active;
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
@@ -411,8 +423,7 @@ int aoc_incall_playback_enable_set(struct aoc_chip *chip, int stream, long val);
 int aoc_incall_playback_mic_channel_get(struct aoc_chip *chip, int stream, long *val);
 int aoc_incall_playback_mic_channel_set(struct aoc_chip *chip, int stream, long val);
 int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute);
-int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute);
-int aoc_incall_mic_gain_set(struct aoc_chip *chip, long gain);
+int aoc_incall_mic_gain_set(struct aoc_chip *chip, int param, long gain);
 
 int aoc_lvm_enable_get(struct aoc_chip *chip, long *enable);
 int aoc_lvm_enable_set(struct aoc_chip *chip, long enable);
