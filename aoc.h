@@ -151,6 +151,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCRandSeed = 0x1011,
 	kAOCChipRevision = 0x1012,
 	kAOCChipType =  0x1013,
+	kAOCGnssType =  0x1014,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \
