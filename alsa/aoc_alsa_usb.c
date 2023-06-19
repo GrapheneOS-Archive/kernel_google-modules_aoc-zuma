@@ -145,6 +145,7 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 		mutex_unlock(&chip->mutex);
 	}
 
+	aoc_set_usb_offload_state(achip, true);
 	return 0;
 }
 
