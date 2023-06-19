@@ -1184,6 +1184,24 @@ int aoc_set_usb_config_v2(struct aoc_chip *chip)
 	return err;
 }
 
+int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable)
+{
+	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE cmd;
+	int err = 0;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SET_OFFLOAD_STATE_ID, sizeof(cmd));
+
+	cmd.offloading = offload_enable;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0) {
+		pr_err("ERR:%d in aoc set usb offload fail\n", err);
+	}
+
+	return err;
+}
+
 static int
 aoc_audio_playback_trigger_source(struct aoc_alsa_stream *alsa_stream, int cmd,
 				  int src)

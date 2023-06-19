@@ -457,6 +457,7 @@ int aoc_set_sink_mode(struct aoc_chip *chip, int sink, int mode);
 
 int aoc_set_usb_config(struct aoc_chip *chip);
 int aoc_set_usb_config_v2(struct aoc_chip *chip);
+int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable);
 
 int aoc_set_usb_mem_config(struct aoc_chip *achip);
 
