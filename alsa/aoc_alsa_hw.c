@@ -1184,6 +1184,33 @@ int aoc_set_usb_config_v2(struct aoc_chip *chip)
 	return err;
 }
 
+int aoc_set_usb_feedback_endpoint(struct aoc_chip *chip, struct usb_device *udev,
+			struct usb_host_endpoint *ep)
+{
+	struct usb_endpoint_descriptor *ep_desc = &ep->desc;
+	struct CMD_USB_CONTROL_SEND_FEEDBACK_EP_INFO cmd;
+	int err = 0;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SEND_FEEDBACK_EP_INFO_ID, sizeof(cmd));
+
+	cmd.enabled = true;
+	cmd.bus_id = udev->bus->busnum;
+	cmd.dev_num = udev->devnum;
+	cmd.slot_id = udev->slot_id;
+	cmd.ep_num = usb_endpoint_num(ep_desc);
+	cmd.max_packet = ep_desc->wMaxPacketSize;
+	cmd.binterval = ep_desc->bInterval;
+	cmd.brefresh = ep_desc->bRefresh;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0) {
+		pr_err("ERR:%d in aoc set usb feedback endpoint\n", err);
+	}
+
+	return err;
+}
+
 int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable)
 {
 	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE cmd;
