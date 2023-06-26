@@ -2719,6 +2719,18 @@ static irqreturn_t watchdog_int_handler(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static struct aoc_section_header *find_ramdump_section(struct aoc_ramdump_header
+						*ramdump_header, int section_type)
+{
+	int i;
+
+	for (i = 0; i < ramdump_header->num_sections; i++)
+		if (ramdump_header->sections[i].type == section_type)
+			return &ramdump_header->sections[i];
+
+	return NULL;
+}
+
 static void aoc_watchdog(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -2743,8 +2755,9 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	u32 section_flags;
 	bool ap_reset = false, invalid_magic;
+	struct aoc_section_header *crash_info_section =
+		find_ramdump_section(ramdump_header, SECTION_TYPE_CRASH_INFO);
 
 	prvdata->total_restarts++;
 
@@ -2799,16 +2812,23 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (!ramdump_header->valid) {
-		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
-		bool crash_reason_valid = (strnlen(crash_reason,
-			sizeof(crash_info)) != 0);
-
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
-		snprintf(crash_info, sizeof(crash_info),
-			"AoC watchdog : %s (incomplete %u:%u)",
-			crash_reason_valid ? crash_reason : "unknown reason",
-			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+		if (crash_info_section) {
+			const char *crash_reason = (const char *)ramdump_header +
+				crash_info_section->offset;
+			bool crash_reason_valid = (strnlen(crash_reason,
+				sizeof(crash_info)) != 0);
+
+			snprintf(crash_info, sizeof(crash_info),
+				"AoC watchdog : %s (incomplete %u:%u)",
+				crash_reason_valid ? crash_reason : "unknown reason",
+				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+		} else {
+			dev_err(prvdata->dev, "could not find crash info section in aoc coredump header");
+			snprintf(crash_info, sizeof(crash_info),
+				"AoC watchdog : unknown reason (incomplete %u:%u)",
+				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+		}
 	}
 
 	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
@@ -2840,11 +2860,9 @@ static void aoc_watchdog(struct work_struct *work)
 #endif
 
 	if (ramdump_header->valid && !invalid_magic) {
-		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
-
-		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
-		if (section_flags & RAMDUMP_FLAG_VALID) {
+		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
+			const char *crash_reason = (const char *)ramdump_header +
+				crash_info_section->offset;
 			dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
 				crash_reason);
 			strscpy(crash_info, crash_reason, sizeof(crash_info));
