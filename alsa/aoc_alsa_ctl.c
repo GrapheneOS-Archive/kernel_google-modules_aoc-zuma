@@ -2071,6 +2071,10 @@ static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
 				       "A2DP_RAW",     "ESCO_LC3" };
 static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
+static const char *usb_mode_texts[] = { "Unconfigured", "USB",
+					"DP_48K_16BIT_2CH", "DP_48K_32BIT_2CH" };
+static SOC_ENUM_SINGLE_DECL(usb_mode_enum, 1, SINK_USB, usb_mode_texts);
+
 /* TODO: seek better way to create a series of controls  */
 static const char *block_asp_mode_texts[] = { "ASP_OFF", "ASP_ON", "ASP_BYPASS",
 					      "ASP_GROUND" };
@@ -2226,6 +2230,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		     aoc_builtin_mic_process_mode_ctl_get, aoc_builtin_mic_process_mode_ctl_set),
 
 	SOC_ENUM_EXT("BT Mode", bt_mode_enum, aoc_sink_mode_ctl_get,
+		     aoc_sink_mode_ctl_set),
+
+	SOC_ENUM_EXT("USB Mode", usb_mode_enum, aoc_sink_mode_ctl_get,
 		     aoc_sink_mode_ctl_set),
 
 	SOC_SINGLE_EXT("USB Dev ID", SND_SOC_NOPM, USB_DEV_ID, 100, 0,

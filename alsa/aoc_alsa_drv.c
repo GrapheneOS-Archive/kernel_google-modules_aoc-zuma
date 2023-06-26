@@ -66,6 +66,7 @@ static const char *const audio_service_names[] = {
 #if ! IS_ENABLED(CONFIG_SOC_GS101)
 	"audio_hotword_tap",
 #endif
+	"audio_displayport",
 	NULL,
 };
 
@@ -73,9 +74,9 @@ static struct aoc_service_resource
 	service_lists[ARRAY_SIZE(audio_service_names) - 1];
 
 static spinlock_t service_lock;
-static int8_t n_services;
-static bool drv_registered;
-static bool aoc_audio_online;
+static int8_t n_services = 0;
+static bool drv_registered = false;
+static bool aoc_audio_online = false;
 static wait_queue_head_t aoc_audio_state_wait_head;
 
 static void compressed_offload_isr(struct aoc_service_dev *dev)
@@ -332,6 +333,12 @@ static int snd_aoc_alsa_probe(void)
 		goto out;
 	}
 
+	err = aoc_dp_init();
+	if (err) {
+		pr_err("ERR: fail to init aoc dp driver\n");
+		goto out;
+	}
+
 	return 0;
 
 out:
@@ -340,6 +347,7 @@ out:
 
 static int snd_aoc_alsa_remove(void)
 {
+	aoc_dp_exit();
 	aoc_voip_exit();
 	aoc_incall_exit();
 	aoc_nohost_exit();
@@ -351,36 +359,40 @@ static int snd_aoc_alsa_remove(void)
 	return 0;
 }
 
-static int aoc_alsa_probe(struct aoc_service_dev *dev)
+static int aoc_alsa_probe(struct aoc_service_dev *adev)
 {
 	int i;
 	int8_t nservices;
+	struct device *dev = &adev->dev;
 
 	spin_lock(&service_lock);
 
 	/* Put the aoc service devices in order */
 	for (i = 0; i < ARRAY_SIZE(service_lists); i++) {
-		if (strcmp(service_lists[i].name, dev_name(&dev->dev)) == 0)
+		if (strcmp(service_lists[i].name, dev_name(dev)) == 0)
 			break;
 	}
 
 	if (i == ARRAY_SIZE(service_lists)) {
-		pr_err("%s: invalid dev %s", __func__, dev_name(&dev->dev));
+		dev_err(dev, "invalid dev %s", dev_name(dev));
 		spin_unlock(&service_lock);
 		return -EINVAL;
 	}
 
-	service_lists[i].dev = dev;
+	service_lists[i].dev = adev;
 	service_lists[i].ref = 0;
 	service_lists[i].event_callback = NULL;
 	service_lists[i].prvdata = NULL;
 	service_lists[i].waiting = false;
-	pr_notice("services %d: %s vs. %s\n", n_services,
-		  service_lists[i].name, dev_name(&dev->dev));
+	dev_notice(dev, "services %d: %s vs. %s\n", n_services,
+		  service_lists[i].name, dev_name(dev));
 
 
 	n_services++;
 	nservices = n_services;
+
+	dev_notice(dev, "services number %d vs. reg number %d\n",
+		(int)ARRAY_SIZE(service_lists), nservices);
 
 	if (nservices == ARRAY_SIZE(service_lists)) {
 		if (!aoc_audio_online) {
@@ -393,28 +405,28 @@ static int aoc_alsa_probe(struct aoc_service_dev *dev)
 	if (nservices == ARRAY_SIZE(service_lists) && !drv_registered) {
 		snd_aoc_alsa_probe();
 		drv_registered = true;
-		pr_notice("alsa-aoc communication is ready!\n");
+		dev_notice(dev, "alsa-aoc communication is ready!\n");
 	}
 
-	if (strcmp(dev_name(&dev->dev), AOC_COMPR_OFFLOAD_SERVICE) == 0)
-		dev->handler = compressed_offload_isr;
+	if (strcmp(dev_name(dev), AOC_COMPR_OFFLOAD_SERVICE) == 0)
+		adev->handler = compressed_offload_isr;
 
 	return 0;
 }
 
-static int aoc_alsa_remove(struct aoc_service_dev *dev)
+static int aoc_alsa_remove(struct aoc_service_dev *adev)
 {
 	int i = 0;
-
+	struct device *dev = &adev->dev;
 	spin_lock(&service_lock);
 
 	for (i = 0; i < ARRAY_SIZE(service_lists); i++) {
-		if (strcmp(service_lists[i].name, dev_name(&dev->dev)) == 0)
+		if (strcmp(service_lists[i].name, dev_name(dev)) == 0)
 			break;
 	}
 
 	if (i == ARRAY_SIZE(service_lists)) {
-		pr_err("%s: invalid dev %s\n", __func__, dev_name(&dev->dev));
+		dev_err(dev, "invalid dev %s\n", dev_name(dev));
 		spin_unlock(&service_lock);
 		return -EINVAL;
 	}
@@ -430,8 +442,8 @@ static int aoc_alsa_remove(struct aoc_service_dev *dev)
 		service_lists[i].event_callback(AOC_SERVICE_EVENT_DOWN, service_lists[i].prvdata);
 
 	if (service_lists[i].ref < 0) {
-		pr_warn("%s: invalid ref %d for %s\n", __func__,
-			service_lists[i].ref, dev_name(&dev->dev));
+		dev_warn(dev, "invalid ref %d for %s\n",
+			service_lists[i].ref, dev_name(dev));
 		service_lists[i].ref = 0;
 	}
 
@@ -443,7 +455,7 @@ static int aoc_alsa_remove(struct aoc_service_dev *dev)
 
 	service_lists[i].waiting = true;
 	spin_unlock(&service_lock);
-	pr_info("alsa wait %s\n", dev_name(&dev->dev));
+	dev_info(dev, "alsa wait %s\n", dev_name(dev));
 
 	/*
 	 * We should block the remove function until the ref
@@ -451,7 +463,7 @@ static int aoc_alsa_remove(struct aoc_service_dev *dev)
 	 */
 	wait_event(service_lists[i].wait_head, service_lists[i].ref == 0);
 
-	pr_info("alsa wait %s done\n", dev_name(&dev->dev));
+	dev_info(dev, "alsa wait %s done\n", dev_name(dev));
 	spin_lock(&service_lock);
 	service_lists[i].waiting = false;
 
@@ -459,7 +471,7 @@ done:
 	n_services--;
 
 	spin_unlock(&service_lock);
-	pr_notice("remove service %s\n", dev_name(&dev->dev));
+	dev_notice(dev, "remove service %s\n", dev_name(dev));
 
 	return 0;
 }
@@ -496,6 +508,8 @@ static int __init aoc_alsa_init(void)
 	}
 
 	aoc_driver_register(&aoc_alsa_driver);
+
+	pr_debug("aoc alsa driver init done\n");
 	return 0;
 }
 

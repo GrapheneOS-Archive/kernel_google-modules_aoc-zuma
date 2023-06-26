@@ -2,6 +2,16 @@
 
 load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
+filegroup(
+    name = "headers",
+    srcs = glob([
+        "*.h",
+    ]),
+    visibility = [
+        "//private/google-modules/display/samsung:__pkg__",
+    ],
+)
+
 kernel_module(
     name = "alsa",
     srcs = glob([
@@ -13,6 +23,7 @@ kernel_module(
         "//private/google-modules/amplifiers/audiometrics:headers",
         "//private/google-modules/aoc:headers",
         "//private/google-modules/aoc_ipc:headers",
+        "//private/google-modules/display/samsung:headers",
         "//private/google-modules/soc/gs:gs_soc_headers",
     ],
     outs = [

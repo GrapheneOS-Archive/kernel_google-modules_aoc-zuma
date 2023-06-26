@@ -55,6 +55,7 @@ static const uint32_t rx_ep_list[] = {
 	IDX_IMSV_RX,           /* immersive-playback */
 	IDX_EP4_RX,           /* reserved */
 	IDX_EP8_RX,           /* reserved */
+	IDX_DP_DMA_NoHOST_RX, /* dp dma hostless rx */
 };
 
 static const uint32_t tx_ep_list[] = {
@@ -865,6 +866,34 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 		.name = "HAPTIC_RX",
 		.id = HAPTIC_RX,
 	},
+
+	{
+		.playback = {
+			.stream_name = "DP_DMA NoHost Playback",
+			.rates = SNDRV_PCM_RATE_8000_192000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+					SNDRV_PCM_FMTBIT_S32_LE,
+			.channels_min = 2,
+			.channels_max = 8,
+		},
+		.name = "DP_DMA NoHost PB",
+		.id = IDX_DP_DMA_NoHOST_RX,
+	},
+
+	{
+		.playback = {
+			.stream_name = "DP_DMA_RX Playback",
+			.rates = SNDRV_PCM_RATE_8000_192000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE |
+					SNDRV_PCM_FMTBIT_S32_LE,
+			.channels_min = 2,
+			.channels_max = 8,
+		},
+		.ops = &be_dai_ops,
+		.name = "DP_DMA_RX",
+		.id = DP_DMA_RX,
+	},
+
 };
 
 static int aoc_compress_new(struct snd_soc_pcm_runtime *rtd, int num)
@@ -1269,6 +1298,27 @@ bool aoc_alsa_usb_playback_enabled(void)
 	return false;
 }
 EXPORT_SYMBOL_GPL(aoc_alsa_usb_playback_enabled);
+
+bool aoc_alsa_dp_playback_enabled(void)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(rx_ep_list); i++) {
+		struct snd_ctl_elem_value ucontrol;
+		int ret;
+
+		ret = aoc_path_get(rx_ep_list[i], DP_DMA_RX, NULL, &ucontrol);
+		if (ret) {
+			pr_err("%s failed ret %d\n", __func__, ret);
+			return false;
+		}
+
+		if (ucontrol.value.integer.value[0])
+			return true;
+	}
+
+	return false;
+}
 
 static int i2s_0_rx_put(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
@@ -1902,6 +1952,8 @@ const struct snd_soc_dapm_widget aoc_widget[] = {
 		SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("HAPTIC_NoHost_RX", "HAPTIC NoHost Playback", 0,
 		SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("DP_DMA_NoHost_RX", "DP_DMA NoHost Playback", 0,
+		SND_SOC_NOPM, 0, 0),
 	/* TX */
 	SND_SOC_DAPM_AIF_OUT("NoHost1_TX", "NoHost1 Capture", 0,
 		SND_SOC_NOPM, 0, 0),
@@ -1916,6 +1968,7 @@ const struct snd_soc_dapm_widget aoc_widget[] = {
 	SND_SOC_DAPM_AIF_OUT("USB_RX", "USB_RX", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("INCALL_RX", "INCALL_RX", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("HAPTIC_RX", "HAPTIC_RX", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("DP_DMA_RX", "DP_DMA_RX", 0, SND_SOC_NOPM, 0, 0),
 
 	SND_SOC_DAPM_AIF_IN("I2S_0_TX", "I2S_0_TX", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("I2S_1_TX", "I2S_1_TX", 0, SND_SOC_NOPM, 0, 0),
@@ -2116,6 +2169,9 @@ static const struct snd_soc_dapm_route aoc_routes[] = {
 	{ "HAPTIC_RX", NULL, "HAPTIC_NoHost_RX" },
 	{ "HW_SINK", NULL, "HAPTIC_RX" },
 
+	{ "DP_DMA_RX", NULL, "DP_DMA_NoHost_RX" },
+	{ "HW_SINK", NULL, "DP_DMA_RX" },
+
 	{ "EP1_TX", NULL, "EP1 TX Mixer" },
 	{ "EP1 TX Mixer", "I2S_0_TX", "I2S_0_TX" },
 	{ "EP1 TX Mixer", "I2S_1_TX", "I2S_1_TX" },
@@ -2235,6 +2291,7 @@ static const struct snd_soc_dapm_route aoc_routes[] = {
 	{ "USB_RX Playback", NULL, "USB_RX" },
 	{ "INCALL_RX Playback", NULL, "INCALL_RX" },
 	{ "HAPTIC_RX Playback", NULL, "HAPTIC_RX" },
+	{ "DP_DMA_RX Playback", NULL, "DP_DMA_RX" },
 
 	/* Capture */
 	{ "I2S_0_TX", NULL, "I2S_0_TX Capture" },
