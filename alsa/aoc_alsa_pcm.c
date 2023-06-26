@@ -570,13 +570,15 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 	pr_debug("buffer_size=%d, period_size=%d pos=%d frame_bits=%d\n", alsa_stream->buffer_size,
 		 alsa_stream->period_size, alsa_stream->pos, runtime->frame_bits);
 
-	/* Advance the write ptr in the DRAM ring buffer for mmap-based playback */
-	if (alsa_stream->stream_type == MMAPED &&
-	    alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
-		if (!aoc_service_advance_write_index(dev->service, AOC_DOWN, avail)) {
-			dev_err(&(dev->dev), "ERR: in advancing pcm playback writer ptr\n");
-		}
+	if (alsa_stream->substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+			alsa_stream->stream_type = MMAPED;
+			/* Advance the write ptr in the DRAM ring buffer for mmap-based playback */
+			avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
+			if (!aoc_service_advance_write_index(dev->service, AOC_DOWN, avail))
+				dev_err(&(dev->dev), "ERR: in advancing pcm playback writer ptr\n");
+		} else
+			alsa_stream->stream_type = NORMAL;
 	}
 
 out:
