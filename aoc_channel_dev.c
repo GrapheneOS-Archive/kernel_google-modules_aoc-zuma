@@ -860,7 +860,7 @@ static int aocc_prepare(struct device *dev)
 	struct aoc_service_dev *service = container_of(parent, struct aoc_service_dev, dev);
 	int rc;
 
-	if (strcmp(dev_name(dev), "com.google.usf") != 0)
+	if (strcmp(dev_name(&service->dev), "com.google.usf") != 0)
 		return 0;
 
 	rc = aocc_send_cmd_msg(service, AOCC_CMD_SUSPEND_PREPARE, 0);
@@ -876,7 +876,7 @@ static void aocc_complete(struct device *dev)
 	struct aoc_service_dev *service = container_of(parent, struct aoc_service_dev, dev);
 	int rc;
 
-	if (strcmp(dev_name(dev), "com.google.usf") != 0)
+	if (strcmp(dev_name(&service->dev), "com.google.usf") != 0)
 		return;
 
 	rc = aocc_send_cmd_msg(service, AOCC_CMD_WAKEUP_COMPELTE, 0);
