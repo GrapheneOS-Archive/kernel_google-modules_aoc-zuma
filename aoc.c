@@ -1990,6 +1990,8 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 		return NULL;
 
 	dev = kzalloc(sizeof(struct aoc_service_dev), GFP_KERNEL);
+	if (!dev)
+		return NULL;
 	prvdata->services[index] = dev;
 
 	name = aoc_service_name(s);
@@ -2271,7 +2273,10 @@ static void aoc_did_become_online(struct work_struct *work)
 	}
 
 	for (i = 0; i < s; i++) {
-		create_service_device(prvdata, i);
+		if (!create_service_device(prvdata, i)) {
+			dev_err(prvdata->dev, "failed to create service device at index %d\n", i);
+			goto err;
+		}
 	}
 
 	aoc_state = AOC_STATE_ONLINE;
