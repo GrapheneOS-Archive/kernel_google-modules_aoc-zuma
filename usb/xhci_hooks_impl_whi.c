@@ -248,6 +248,7 @@ static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 	/* Notification for xhci driver removing */
 	usb_host_mode_state_notify(USB_DISCONNECTED);
 
+	cancel_work_sync(&offload_data->offload_connect_ws);
 	kfree(offload_data);
 	offload_data = NULL;
 }
