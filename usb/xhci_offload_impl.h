@@ -9,11 +9,6 @@
 #ifndef __XHCI_OFFLOAD_IMPL_H
 #define __XHCI_OFFLOAD_IMPL_H
 
-enum usb_offload_op_mode {
-	USB_OFFLOAD_STOP,
-	USB_OFFLOAD_DRAM
-};
-
 struct xhci_offload_data {
 	struct xhci_hcd *xhci;
 
@@ -21,7 +16,8 @@ struct xhci_offload_data {
 	bool dt_direct_usb_access;
 	bool offload_state;
 
-	enum usb_offload_op_mode op_mode;
+	/* count how many usb audio devices are connected */
+	int usb_audio_count;
 
 	struct work_struct offload_connect_ws;
 };

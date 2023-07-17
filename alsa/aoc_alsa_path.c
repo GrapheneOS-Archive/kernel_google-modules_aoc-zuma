@@ -898,7 +898,11 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 
 static int aoc_compress_new(struct snd_soc_pcm_runtime *rtd, int num)
 {
-	return snd_soc_new_compress(rtd, num);
+	int ret = snd_soc_new_compress(rtd, num);
+	if (ret >= 0) {
+		rtd->pcm->nonatomic = true;
+	}
+	return ret;
 }
 
 static int be_startup(struct snd_pcm_substream *stream, struct snd_soc_dai *dai)

@@ -33,60 +33,6 @@ static void sound_vendor_support_suspend(void *unused, struct usb_device *udev,
 }
 
 /*
- * This returns the enum of device/hub info.
- * Currently we only distinguish one layer usb device, so it only
- * has usb1~3, and usb1-1/usb2-1/usb3-1. For the other cases we
- * return UNDEFINED.
- * TODO(b/199883028): optimize this function to be flexible.
- */
-static int get_usb_dev_hub_info(struct usb_device *udev)
-{
-	enum usb_dev_hub usb_dev_hub = UNDEFINED;
-
-	if (!udev)
-		return usb_dev_hub;
-
-	if (!udev->parent) {
-		/* hub */
-		switch (udev->bus->busnum) {
-		case 1:
-			usb_dev_hub = USB1;
-			break;
-		case 2:
-			usb_dev_hub = USB2;
-			break;
-		case 3:
-			usb_dev_hub = USB3;
-			break;
-		default:
-			usb_dev_hub = UNDEFINED;
-			break;
-		}
-	} else {
-		/* device */
-		switch (udev->bus->busnum) {
-		case 1:
-			if (udev->portnum == 1)
-				usb_dev_hub = USB1_1;
-			break;
-		case 2:
-			if (udev->portnum == 1)
-				usb_dev_hub = USB2_1;
-			break;
-		case 3:
-			if (udev->portnum == 1)
-				usb_dev_hub = USB3_1;
-			break;
-		default:
-			usb_dev_hub = UNDEFINED;
-			break;
-		}
-	}
-
-	return usb_dev_hub;
-}
-
-/*
  * Set bypass = 1 will skip USB suspend.
  */
 static void usb_vendor_dev_suspend(void *unused, struct usb_device *udev,
@@ -94,39 +40,21 @@ static void usb_vendor_dev_suspend(void *unused, struct usb_device *udev,
 {
 	bool usb_playback = false;
 	bool usb_capture = false;
-	enum usb_dev_hub usb_dev_hub;
+	int usb_audio_count = xhci_get_usb_audio_count();
 
-	if (!udev) {
-		*bypass = 0;
+	*bypass = 0;
+
+	/* If no USB audio device is connected, we won't skip suspend.*/
+	if (!udev || usb_audio_count < 1)
 		return;
-	}
-
-	usb_dev_hub = get_usb_dev_hub_info(udev);
-
-	/*
-	 * We don't change dummy_hcd's behavior, the dummy_hcd is in bus 1.
-	 * We don't change undefined device neither.
-	 */
-	if (usb_dev_hub >= USB1 && usb_dev_hub <= USB1_1) {
-		*bypass = 0;
-		return;
-	}
 
 	usb_playback = aoc_alsa_usb_playback_enabled();
 	usb_capture = aoc_alsa_usb_capture_enabled();
-	*bypass = 0;
 
-	/*
-	 * Note: Currently we also allow the UNDEFINED case go to check
-	 * playback/capture state. For example, the headset behind hub
-	 * may be USB2-1.1
-	 */
-	if ((usb_dev_hub >= USB2 && usb_dev_hub <= USB3_1) || usb_dev_hub == UNDEFINED) {
-		if (usb_playback || usb_capture) {
-			dev_info(&udev->dev, "%s: skip suspend process (playback:%d,capture:%d)\n",
-				 __func__, usb_playback, usb_capture);
-			*bypass = 1;
-		}
+	if (usb_playback || usb_capture) {
+		dev_info(&udev->dev, "%s: skip suspend process (playback:%d,capture:%d)\n",
+			 __func__, usb_playback, usb_capture);
+		*bypass = 1;
 	}
 
 	return;
@@ -138,24 +66,10 @@ static void usb_vendor_dev_suspend(void *unused, struct usb_device *udev,
 static void usb_vendor_dev_resume(void *unused, struct usb_device *udev,
 				  pm_message_t msg, int *bypass)
 {
-	enum usb_dev_hub usb_dev_hub;
-
 	if (!udev) {
 		*bypass = 0;
 		return;
 	}
-
-	usb_dev_hub = get_usb_dev_hub_info(udev);
-
-	/*
-	 * We don't change dummy_hcd's behavior, the dummy_hcd is in bus 1.
-	 * We don't change undefined device neither.
-	 */
-	if (usb_dev_hub <= USB1_1) {
-		*bypass = 0;
-		return;
-	}
-
 
 	if (udev->port_is_suspended || udev->state == USB_STATE_SUSPENDED) {
 		*bypass = 0;
@@ -184,9 +98,9 @@ int usb_vendor_helper_init(void)
 		pr_err("register_trace_android_vh_sound_usb_support_cpu_suspend failed, ret:%d\n",
 		       ret);
 
-	ret = register_trace_android_vh_usb_dev_suspend(usb_vendor_dev_suspend, NULL);
+	ret = register_trace_android_rvh_usb_dev_suspend(usb_vendor_dev_suspend, NULL);
 	if (ret)
-		pr_err("register_trace_android_vh_usb_dev_suspend failed, ret:%d\n", ret);
+		pr_err("register_trace_android_rvh_usb_dev_suspend failed, ret:%d\n", ret);
 
 	ret = register_trace_android_vh_usb_dev_resume(usb_vendor_dev_resume, NULL);
 	if (ret)

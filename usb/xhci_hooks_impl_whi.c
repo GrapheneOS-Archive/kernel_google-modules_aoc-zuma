@@ -55,6 +55,19 @@ static u32 xhci_get_endpoint_type(struct usb_host_endpoint *ep)
 }
 
 /*
+ * If the Host connected to a hub, user may connect more than two USB audio
+ * headsets or DACs. A caller can call this function to know how many USB
+ * audio devices are connected now.
+ */
+int xhci_get_usb_audio_count(void)
+{
+	if (offload_data)
+		return offload_data->usb_audio_count;
+	else
+		return 0;
+}
+
+/*
  * Determine if an USB device is a compatible devices:
  *     True: Devices are audio class and they contain ISOC endpoint
  *    False: Devices are not audio class or they're audio class but no ISOC endpoint or
@@ -160,15 +173,14 @@ static int xhci_udev_notify(struct notifier_block *self, unsigned long action,
 	case USB_DEVICE_ADD:
 		if (is_compatible_with_usb_audio_offload(udev)) {
 			dev_dbg(&udev->dev, "Compatible with usb audio offload\n");
-			if (offload_data->op_mode == USB_OFFLOAD_DRAM) {
-				xhci_sync_conn_stat(udev->bus->busnum, udev->devnum, udev->slot_id,
-						    USB_CONNECTED);
-			}
+			offload_data->usb_audio_count++;
+			xhci_sync_conn_stat(udev->bus->busnum, udev->devnum, udev->slot_id,
+					    USB_CONNECTED);
 		}
 		break;
 	case USB_DEVICE_REMOVE:
-		if (is_compatible_with_usb_audio_offload(udev) &&
-		    (offload_data->op_mode == USB_OFFLOAD_DRAM)) {
+		if (is_compatible_with_usb_audio_offload(udev)) {
+			offload_data->usb_audio_count--;
 			xhci_sync_conn_stat(udev->bus->busnum, udev->devnum, udev->slot_id,
 					    USB_DISCONNECTED);
 		}
@@ -214,10 +226,10 @@ static int usb_audio_offload_init(struct xhci_hcd *xhci)
 		dev_warn(dev, "Direct USB access is not supported\n");
 
 	offload_data->offload_state = true;
+	offload_data->usb_audio_count = 0;
 
 	aoc_alsa_usb_callback_register(setup_transfer_ring);
 	usb_register_notify(&xhci_udev_nb);
-	offload_data->op_mode = USB_OFFLOAD_DRAM;
 	offload_data->xhci = xhci;
 
 	INIT_WORK(&offload_data->offload_connect_ws, offload_connect_work);
@@ -239,7 +251,6 @@ static void usb_audio_offload_cleanup(struct xhci_hcd *xhci)
 {
 	offload_data->usb_audio_offload = false;
 	offload_data->offload_state = false;
-	offload_data->op_mode = USB_OFFLOAD_STOP;
 	offload_data->xhci = NULL;
 
 	aoc_alsa_usb_callback_unregister();
