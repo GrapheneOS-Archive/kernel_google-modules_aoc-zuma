@@ -2232,22 +2232,25 @@ int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable)
 	return 0;
 }
 
-#if ! IS_ENABLED(CONFIG_SOC_GS101)
 int aoc_hotword_tap_enable(struct aoc_chip *chip, long enable)
 {
-	int cmd_id, err = 0;
+	if (chip->hotword_supported) {
+		int cmd_id, err = 0;
 
-	cmd_id = (enable == 1) ? CMD_AUDIO_INPUT_HOTWORD_ENABLE_HOTWORD_TAP_ID :
-				       CMD_AUDIO_INPUT_HOTWORD_DISABLE_HOTWORD_TAP_ID;
-	err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
-	if (err < 0) {
-		pr_err("ERR:%d in hotword tap %s\n", err, (enable) ? "enable" : "disable");
-		return err;
+		cmd_id = (enable == 1) ? CMD_AUDIO_INPUT_HOTWORD_ENABLE_HOTWORD_TAP_ID :
+						CMD_AUDIO_INPUT_HOTWORD_DISABLE_HOTWORD_TAP_ID;
+		err = aoc_audio_control_simple_cmd(CMD_INPUT_CHANNEL, cmd_id, chip);
+		if (err < 0) {
+			pr_err("ERR:%d in hotword tap %s\n", err, (enable) ? "enable" : "disable");
+			return err;
+		}
+
+		return 0;
+	} else {
+		pr_err("WARN:hotword is not supported on this device\n");
+		return 0;
 	}
-
-	return 0;
 }
-#endif
 
 int aoc_load_cca_module(struct aoc_chip *chip, long load)
 {
@@ -3973,66 +3976,66 @@ int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value)
 
 int aoc_audio_set_chre_src_pdm_gain(struct aoc_chip *chip, int gain)
 {
-#if ! IS_ENABLED(CONFIG_SOC_GS101)
-	int err;
-	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN cmd;
+	if (chip->chre_supported) {
+		int err;
+		struct CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN cmd;
 
-	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN_ID,
-		     sizeof(cmd));
-	cmd.gain_centibel = gain;
+		AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN_ID,
+				sizeof(cmd));
+		cmd.gain_centibel = gain;
 
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), (uint8_t *)&cmd, chip);
-	if (err < 0)
-		pr_err("ERR:%d in AoC Set CHRE PDM gain\n", err);
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+					sizeof(cmd), (uint8_t *)&cmd, chip);
+		if (err < 0)
+			pr_err("ERR:%d in AoC Set CHRE PDM gain\n", err);
 
-	return err < 0 ? err : 0;
-#else
-	pr_err("WARN: setting CHRE PDM gain is not supported\n");
-	return 0;
-#endif
+		return err < 0 ? err : 0;
+	} else {
+		pr_err("WARN: setting CHRE PDM gain is not supported\n");
+		return 0;
+	}
 }
 
 int aoc_audio_set_chre_src_aec_gain(struct aoc_chip *chip, int gain)
 {
-#if ! IS_ENABLED(CONFIG_SOC_GS101)
-	int err;
-	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN cmd;
+	if (chip->chre_supported) {
+		int err;
+		struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN cmd;
 
-	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN_ID,
-		     sizeof(cmd));
-	cmd.gain_centibel = gain;
+		AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN_ID,
+				sizeof(cmd));
+		cmd.gain_centibel = gain;
 
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), (uint8_t *)&cmd, chip);
-	if (err < 0)
-		pr_err("ERR:%d in AoC Set CHRE AEC gain\n", err);
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+					sizeof(cmd), (uint8_t *)&cmd, chip);
+		if (err < 0)
+			pr_err("ERR:%d in AoC Set CHRE AEC gain\n", err);
 
-	return err < 0 ? err : 0;
-#else
-	pr_err("WARN: setting CHRE AEC gain is not supported\n");
-	return 0;
-#endif
+		return err < 0 ? err : 0;
+	} else {
+		pr_err("WARN: setting CHRE AEC gain is not supported\n");
+		return 0;
+	}
 }
 
 int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout)
 {
-#if ! IS_ENABLED(CONFIG_SOC_GS101)
-	int err;
-	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT cmd;
+	if (chip->chre_supported) {
+		int err;
+		struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT cmd;
 
-	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT_ID,
-		     sizeof(cmd));
-	cmd.timeout_ms = timeout;
+		AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT_ID,
+				sizeof(cmd));
+		cmd.timeout_ms = timeout;
 
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), (uint8_t *)&cmd, chip);
-	if (err < 0)
-		pr_err("ERR:%d in AoC Set CHRE timeout\n", err);
+		err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+					sizeof(cmd), (uint8_t *)&cmd, chip);
+		if (err < 0)
+			pr_err("ERR:%d in AoC Set CHRE timeout\n", err);
 
-	return err < 0 ? err : 0;
-#else
-	pr_err("WARN: setting CHRE AEC gain is not supported\n");
-	return 0;
-#endif
+		return err < 0 ? err : 0;
+	} else {
+		pr_err("WARN: setting CHRE AEC gain is not supported\n");
+		return 0;
+	}
 }

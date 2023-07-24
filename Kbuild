@@ -8,7 +8,10 @@ ccflags-y	+= -I$(srctree)/drivers/dma-buf
 obj-$(CONFIG_WC_MBOX)			+= mailbox-wc.o
 
 obj-$(CONFIG_AOC_DRIVER)		+= aoc_core.o
-aoc_core-objs	:= aoc.o ../aoc_ipc/aoc_ipc_core.o aoc_firmware.o ion_physical_heap.o
+aoc_core-objs	:= aoc.o ../aoc_ipc/aoc_ipc_core.o aoc_firmware.o ion_physical_heap.o aoc_service_core.o
+ifneq ($(filter y, $(CONFIG_SOC_GS101) $(CONFIG_SOC_GS201) $(CONFIG_SOC_ZUMA)),)
+aoc_core-objs	+= aoc_v1.o
+endif
 
 obj-$(CONFIG_AOC_CHAR_DRIVER)		+= aoc_char_dev.o
 obj-$(CONFIG_AOC_CONTROL_DRIVER)	+= aoc_control_dev.o
