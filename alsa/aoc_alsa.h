@@ -344,6 +344,9 @@ struct aoc_alsa_stream {
 	int wq_busy_count;
 
 	struct work_struct free_aoc_service_work;
+	struct workqueue_struct *pcm_period_wq;
+	struct workqueue_struct *incall_period_wq;
+	struct workqueue_struct *voip_period_wq;
 	struct work_struct pcm_period_work;
 };
 

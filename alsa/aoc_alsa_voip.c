@@ -89,7 +89,7 @@ static enum hrtimer_restart aoc_voip_irq_process(struct aoc_alsa_stream *alsa_st
 	if (atomic_read(&alsa_stream->cancel_work_active) > 0)
 		return HRTIMER_RESTART;
 
-	if (!queue_work(system_highpri_wq, &alsa_stream->pcm_period_work)) {
+	if (!queue_work(alsa_stream->voip_period_wq, &alsa_stream->pcm_period_work)) {
 		wake_up(&alsa_stream->substream->runtime->sleep);
 		wake_up(&alsa_stream->substream->runtime->tsleep);
 		alsa_stream->wq_busy_count++;
@@ -198,6 +198,12 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	atomic_set(&alsa_stream->cancel_work_active, 0);
 
 	INIT_WORK(&alsa_stream->pcm_period_work, aoc_pcm_period_work_handler);
+	alsa_stream->voip_period_wq = alloc_ordered_workqueue("alsa_voip_period_work", WQ_HIGHPRI);
+	if (!alsa_stream->voip_period_wq) {
+		err = -ENOMEM;
+		pr_err("ERR: fail to alloc workqueue for %s", rtd->dai_link->name);
+		goto out;
+	}
 
 	/* Ring buffer will be flushed at prepare() before playback/capture */
 	alsa_stream->hw_ptr_base = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) ?
@@ -235,7 +241,14 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	return 0;
 out:
-	kfree(alsa_stream);
+	if (alsa_stream) {
+		if (alsa_stream->voip_period_wq) {
+			flush_workqueue(alsa_stream->voip_period_wq);
+			destroy_workqueue(alsa_stream->voip_period_wq);
+		}
+		kfree(alsa_stream);
+	}
+
 	if (dev) {
 		free_aoc_audio_service(rtd->dai_link->name, dev);
 		dev = NULL;
@@ -260,7 +273,10 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 	aoc_timer_stop_sync(alsa_stream);
 	atomic_set(&alsa_stream->cancel_work_active, 1);
 	audio_free_isr(alsa_stream->dev);
-	cancel_work_sync(&alsa_stream->pcm_period_work);
+	if (alsa_stream->voip_period_wq) {
+		flush_workqueue(alsa_stream->voip_period_wq);
+		destroy_workqueue(alsa_stream->voip_period_wq);
+	}
 	atomic_set(&alsa_stream->cancel_work_active, 0);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
