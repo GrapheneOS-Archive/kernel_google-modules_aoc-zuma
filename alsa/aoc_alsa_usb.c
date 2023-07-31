@@ -26,6 +26,11 @@ static struct uaudio_dev uadev[SNDRV_CARDS];
 
 void (*cb_func)(struct usb_device*, struct usb_host_endpoint*);
 
+static bool snd_usb_is_implicit_feedback(struct snd_usb_endpoint *ep)
+{
+	return  ep->implicit_fb_sync && usb_pipeout(ep->pipe);
+}
+
 static struct snd_usb_substream *find_substream(unsigned int card_num,
 	unsigned int device, unsigned int direction)
 {
@@ -98,13 +103,14 @@ void usb_audio_offload_suspend(struct usb_interface *intf, pm_message_t message)
 
 int aoc_set_usb_mem_config(struct aoc_chip *achip)
 {
-	struct usb_host_endpoint *ep;
-	struct usb_host_endpoint *fb_ep;
-	struct snd_usb_substream *subs;
-	struct snd_usb_audio *chip;
-	int card_num;
-	int device;
-	int direction;
+	struct usb_host_endpoint *ep = NULL;
+	struct usb_host_endpoint *fb_ep = NULL;
+	struct snd_usb_substream *subs = NULL;
+	struct snd_usb_audio *chip = NULL;
+	unsigned int card_num;
+	unsigned int device;
+	unsigned int direction;
+	bool implicit_fb = false;
 
 	if (!achip)
 		return -ENODEV;
@@ -112,17 +118,17 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 	card_num = achip->usb_card;
 	device = achip->usb_device;
 	direction = achip->usb_direction;
-	chip = uadev[card_num].chip;
+	if (card_num < SNDRV_CARDS) {
+		chip = uadev[card_num].chip;
+	}
 	if (!chip) {
-		pr_err("%s no device connected (card %d device %d, direction %d)",
+		pr_err("%s no device connected (card %u device %u, direction %u)",
 			__func__, card_num, device, direction);
 		return -ENODEV;
 	}
-	pr_info("%s card %d device %d, direction %d", __func__,
+	pr_info("%s card %u device %u, direction %u", __func__,
 			card_num, device, direction);
-	if ((card_num >= 0 && card_num < SNDRV_CARDS) &&
-		(device >= 0) &&
-		(direction >= 0 && direction <= SNDRV_PCM_STREAM_CAPTURE)) {
+	if (direction <= SNDRV_PCM_STREAM_CAPTURE) {
 		mutex_lock(&chip->mutex);
 		subs = find_substream(card_num, device, direction);
 		if (!subs) {
@@ -131,6 +137,7 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 			return -ENODEV;
 		}
 		ep = usb_pipe_endpoint(subs->dev, subs->data_endpoint->pipe);
+		implicit_fb = snd_usb_is_implicit_feedback(subs->data_endpoint);
 		if (!ep) {
 			pr_err("%s data ep # %d context is null\n",
 					__func__, subs->data_endpoint->ep_num);
@@ -144,7 +151,7 @@ int aoc_set_usb_mem_config(struct aoc_chip *achip)
 			pr_info("%s call aoc_alsa_usb_callback_register() first, skip", __func__);
 		}
 
-		if (subs->sync_endpoint) {
+		if (subs->sync_endpoint && !implicit_fb) {
 			fb_ep = usb_pipe_endpoint(subs->dev, subs->sync_endpoint->pipe);
 			if (!fb_ep) {
 				pr_info("%s sync ep # %d context is null\n",
