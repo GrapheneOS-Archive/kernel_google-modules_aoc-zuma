@@ -38,6 +38,7 @@ static void free_aoc_service_work_handler(struct work_struct *work)
 	if (alsa_stream->pcm_period_wq) {
 		flush_workqueue(alsa_stream->pcm_period_wq);
 		destroy_workqueue(alsa_stream->pcm_period_wq);
+		alsa_stream->pcm_period_wq = NULL;
 	}
 	atomic_set(&alsa_stream->cancel_work_active, 0);
 
@@ -211,7 +212,7 @@ static enum hrtimer_restart aoc_pcm_irq_process(struct aoc_alsa_stream *alsa_str
 	}
 
 	/* Do not queue a work if the cancel_work is active */
-	if (atomic_read(&alsa_stream->cancel_work_active) > 0)
+	if (atomic_read(&alsa_stream->cancel_work_active) > 0 || alsa_stream->pcm_period_wq == NULL)
 		return HRTIMER_RESTART;
 
 	if (!queue_work(alsa_stream->pcm_period_wq, &alsa_stream->pcm_period_work)) {
@@ -390,6 +391,7 @@ out:
 		if (alsa_stream->pcm_period_wq) {
 			flush_workqueue(alsa_stream->pcm_period_wq);
 			destroy_workqueue(alsa_stream->pcm_period_wq);
+			alsa_stream->pcm_period_wq = NULL;
 		}
 		kfree(alsa_stream);
 	}
@@ -415,6 +417,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 	if (alsa_stream->pcm_period_wq) {
 		flush_workqueue(alsa_stream->pcm_period_wq);
 		destroy_workqueue(alsa_stream->pcm_period_wq);
+		alsa_stream->pcm_period_wq = NULL;
 	}
 	atomic_set(&alsa_stream->cancel_work_active, 0);
 
