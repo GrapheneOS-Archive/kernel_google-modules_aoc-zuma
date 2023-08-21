@@ -718,11 +718,32 @@ static int aoc_compr_get_metadata(struct snd_soc_component *component,
 	return ret;
 }
 
+static int snd_audiocodec_to_aoc_decoder(int snd_type, int codec_param)
+{
+	pr_info("%s: snd_type=%x, codec_param=%x\n", __func__, snd_type, codec_param);
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+	if (((codec_param >> 16) & 0xFFFF) == AOC_CODEC_TAG) {
+		int codec = codec_param & 0xFFFF;
+		if (codec == AOC_CODEC_OPUS)
+			return AUDIO_OUTPUT_DECODER_OPUS;
+	}
+#endif
+	switch(snd_type) {
+	case SND_AUDIOCODEC_MP3:
+		return AUDIO_OUTPUT_DECODER_MP3;
+	case SND_AUDIOCODEC_AAC:
+		return AUDIO_OUTPUT_DECODER_AAC_LC;
+	default:
+		return AUDIO_OUTPUT_DECODER_UNKNOWN;
+	}
+}
+
 static int aoc_compr_set_params(struct snd_soc_component *component,
 				struct snd_compr_stream *cstream, struct snd_compr_params *params)
 {
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
+	struct snd_codec *codec = &params->codec;
 
 	uint8_t *temp_data_buf;
 	int buffer_size;
@@ -750,7 +771,13 @@ static int aoc_compr_set_params(struct snd_soc_component *component,
 
 	/* TODO: need to double check on the AoC decoder requirements */
 	alsa_stream->channels  =  params->codec.ch_out;
-	alsa_stream->compr_offload_codec = params->codec.id;
+	alsa_stream->compr_offload_codec =
+		snd_audiocodec_to_aoc_decoder(params->codec.id, codec->reserved[0]);
+
+	if (alsa_stream->compr_offload_codec == AUDIO_OUTPUT_DECODER_UNKNOWN) {
+		pr_err("ERR: unsupport codec %x\n", params->codec.id);
+		return -EINVAL;
+	}
 	/* TODO: send the codec info to AoC ? */
 
 	return 0;

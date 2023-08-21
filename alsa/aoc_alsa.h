@@ -125,6 +125,12 @@ enum uc_device_id {
 
 #define NULL_PATH -1
 
+#define AOC_CODEC_TAG 0xA0CC
+
+enum aoc_offload_codec {
+	AOC_CODEC_OPUS = 1,
+};
+
 /* TODO: Copied from AoC repo and will be removed */
 enum bluetooth_mode {
 	AHS_BT_MODE_UNCONFIGURED = 0,
