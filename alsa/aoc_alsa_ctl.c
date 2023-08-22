@@ -2052,6 +2052,38 @@ static int us_record_ctl_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int dp_start_threshold_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->dp_start_threshold;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int dp_start_threshold_set(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val = ucontrol->value.integer.value[0];
+
+	if (val < 0 || val > MAX_DP_START_THRESHOLD)
+		return -EINVAL;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->dp_start_threshold = val;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 /* TODO: this has to be consistent to enum APMicProcessIndex in aoc-interface.h */
 static const char *builtin_mic_process_mode_texts[] = { "Raw", "Spatial" };
 static SOC_ENUM_SINGLE_DECL(builtin_mic_process_mode_enum, 1, 0,
@@ -2478,6 +2510,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0,
 		voice_pcm_wait_time_get, voice_pcm_wait_time_set),
+
+	SOC_SINGLE_EXT("Displayport Audio Start Threshold", SND_SOC_NOPM, 0,
+			MAX_DP_START_THRESHOLD, 0,
+			dp_start_threshold_get, dp_start_threshold_set),
 
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,

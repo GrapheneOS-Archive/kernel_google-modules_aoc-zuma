@@ -82,6 +82,8 @@ enum uc_device_id {
 
 #define N_MIC_IN_SPATIAL_MODULE 3
 
+#define MAX_DP_START_THRESHOLD 19200 // 2ch * 16bit * 48000 * 100ms
+
 /* TODO: the exact number has to be determined based on hardware platform*/
 #define MAX_NUM_OF_SUBSTREAMS 64
 #define MAX_NUM_OF_SINKS 5
@@ -241,6 +243,8 @@ struct aoc_chip {
 
 	struct aoc_service_dev *dev_alsa_stream[MAX_NUM_OF_SUBSTREAMS];
 	struct aoc_service_dev *dp_dev;
+	size_t dp_start_threshold;
+	int dp_starting;
 	int default_mic_id;
 	int buildin_mic_id_list[NUM_OF_BUILTIN_MIC];
 	int buildin_us_mic_id_list[NUM_OF_BUILTIN_MIC];

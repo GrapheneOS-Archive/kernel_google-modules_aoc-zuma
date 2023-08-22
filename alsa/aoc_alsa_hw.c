@@ -2871,6 +2871,7 @@ int aoc_displayport_service_alloc(struct aoc_chip *chip)
 	if (err < 0)
 		goto error;
 
+	chip->dp_starting = 0;
 	chip->dp_dev = dev;
 error:
 	mutex_unlock(&chip->audio_cmd_chan_mutex);
@@ -2885,6 +2886,7 @@ int aoc_displayport_service_free(struct aoc_chip *chip)
 	if (mutex_lock_interruptible(&chip->audio_cmd_chan_mutex))
 		return -EINTR;
 
+	chip->dp_starting = 0;
 	dev = chip->dp_dev;
 	chip->dp_dev = NULL;
 	if (dev)
@@ -2936,10 +2938,26 @@ int aoc_displayport_read(struct aoc_chip *chip, void *dest, size_t buf_size)
 		err = -EINVAL;
 		goto done;
 	}
+	if (chip->dp_starting == 0) {
+		if (chip->dp_start_threshold == 0) {
+			dev_warn(&dev->dev, "use default start threshold\n");
+			chip->dp_start_threshold = buf_size * 2;
+		}
+		if (avail < chip->dp_start_threshold) {
+			dev_warn(&dev->dev,
+				"Wait more dp buffer to start. avail = %zu, threshold = %zu\n",
+				avail, chip->dp_start_threshold);
+			err = -EAGAIN;
+			goto done;
+		}
+		chip->dp_starting = 1;
+	}
 
 	if (unlikely(avail < buf_size)) {
 		dev_err(&dev->dev, "ERR: overrun in displayport read. avail = %zu, toread = %zu\n",
 		       avail, buf_size);
+		err = -EAGAIN;
+		goto done;
 	}
 
 	/* Only read bytes available in the ring buffer */
