@@ -76,12 +76,10 @@ int usb_host_mode_state_notify(enum aoc_usb_state usb_state);
 int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring);
 int xhci_get_usb_audio_count(void);
 
-bool is_aoc_usb_probe_done(void);
-
 int xhci_offload_helper_init(void);
 int usb_vendor_helper_init(void);
 
-extern int dwc3_otg_fsm_try_reset(bool enabled);
+extern int dwc3_otg_host_ready(bool ready);
 extern bool aoc_alsa_usb_capture_enabled(void);
 extern bool aoc_alsa_usb_playback_enabled(void);
 
