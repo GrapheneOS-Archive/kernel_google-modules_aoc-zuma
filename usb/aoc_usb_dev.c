@@ -191,17 +191,6 @@ static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, void *data)
 	struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2 *cmd;
 	struct conn_stat_args *args = data;
 
-	// Don't update usb audio device counter if the notification is for xhci driver state.
-	if (args->bus_id != 0 && args->dev_num != 0 && args->slot_id != 0) {
-		if (args->conn_stat)
-			drvdata->usb_conn_state++;
-		else
-			drvdata->usb_conn_state--;
-
-		dev_dbg(&drvdata->adev->dev, "currently connected usb audio device count = %u\n",
-			drvdata->usb_conn_state);
-	}
-
 	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_NOTIFY_CONN_STAT_V2), GFP_KERNEL);
 	if (!cmd)
 		return -ENOMEM;
@@ -321,28 +310,6 @@ static int aoc_usb_notify(struct notifier_block *this,
 	return ret;
 }
 
-static enum usb_recover_state recover_state;
-static struct work_struct usb_recovery_ws;
-static void usb_recovery_work(struct work_struct *ws)
-{
-	pr_debug("%s: recover_state: %d\n", __func__, recover_state);
-
-	switch(recover_state) {
-	case RECOVER_HOST_OFF:
-		dwc3_otg_host_enable(false);
-		break;
-	case RECOVER_HOST_ON:
-		dwc3_otg_host_enable(true);
-		recover_state = RECOVERED;
-		break;
-	default:
-		pr_err("%s: unhandled recover_state: %d\n", __func__, recover_state);
-		break;
-	}
-
-	return;
-}
-
 static int aoc_usb_match(struct device *dev, void *data)
 {
 	if (sysfs_streq(dev_driver_string(dev), "xhci-hcd-exynos"))
@@ -414,7 +381,6 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 		return -ENOMEM;
 	}
 
-	drvdata->usb_conn_state = 0;
 	drvdata->service_timeout = msecs_to_jiffies(100);
 	drvdata->nb.notifier_call = aoc_usb_notify;
 	register_aoc_usb_notifier(&drvdata->nb);
@@ -423,16 +389,10 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 
 	aoc_usb_probe_done = true;
 
-	/* Restart host if recover_state was triggered */
-	if (recover_state == RECOVER_HOST_OFF) {
-		dev_dbg(&drvdata->adev->dev, "restart usb device\n");
-		recover_state = RECOVER_HOST_ON;
-		schedule_work(&usb_recovery_ws);
-	} else {
-		recover_state = NONE;
-	}
-
 	schedule_work(&usb_host_mode_checking_ws);
+
+	// Clear the fsm_reset flag to resume otg_fsm for host/gadget mode bring up.
+	dwc3_otg_fsm_try_reset(false);
 
 	return 0;
 }
@@ -441,16 +401,9 @@ static int aoc_usb_remove(struct aoc_service_dev *adev)
 {
 	struct aoc_usb_drvdata *drvdata = dev_get_drvdata(&adev->dev);
 
-	/*
-	 * Trigger recovery if usb accessory is connected.
-	 * We only disable host at this moment, it will restart host
-	 * after aoc usb probe again.
-	 */
-	if (drvdata->usb_conn_state) {
-		dev_dbg(&drvdata->adev->dev, "need to recover usb device\n");
-		recover_state = RECOVER_HOST_OFF;
-		schedule_work(&usb_recovery_ws);
-	}
+	// If gadget mode is engaged, we raise the fsm_reset flag and wait.
+	// Otherwise, we reset otg_fsm directly.
+	dwc3_otg_fsm_try_reset(true);
 
 	unregister_aoc_usb_notifier(&drvdata->nb);
 	wakeup_source_unregister(drvdata->ws);
@@ -487,7 +440,6 @@ static int __init aoc_usb_init(void)
 	xhci_offload_helper_init();
 	usb_vendor_helper_init();
 
-	INIT_WORK(&usb_recovery_ws, usb_recovery_work);
 	INIT_WORK(&usb_host_mode_checking_ws, usb_host_mode_checking_work);
 
 	return aoc_driver_register(&aoc_usb_driver);
