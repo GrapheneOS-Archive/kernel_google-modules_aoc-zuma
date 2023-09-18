@@ -175,6 +175,7 @@ struct aoc_prvdata {
 
 	int watchdog_irq;
 	struct work_struct watchdog_work;
+	bool first_fw_load;
 	bool aoc_reset_done;
 	bool ap_triggered_reset;
 	char ap_reset_reason[AP_RESET_REASON_LENGTH];
@@ -298,6 +299,7 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset);
 
 static irqreturn_t watchdog_int_handler(int irq, void *dev);
 static void aoc_watchdog(struct work_struct *work);
+static void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
 static int aoc_itmon_notifier(struct notifier_block *nb, unsigned long action,
@@ -883,7 +885,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		aoc_a32_reset();
 	}
 
-	enable_irq(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, true);
 
 	/* Monitor if there is callback from aoc after 5sec */
 	cancel_delayed_work_sync(&prvdata->monitor_work);
@@ -1524,8 +1526,6 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	}
 
 	aoc_reset_successful = false;
-	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
-	disable_irq_nosync(prvdata->sysmmu_secure_irq);
 	for (i = 0; i < aoc_reset_tries; i++) {
 		dev_info(prvdata->dev, "resetting aoc\n");
 		writel(AOC_PCU_WATCHDOG_KEY_UNLOCK, pcu + AOC_PCU_WATCHDOG_KEY_OFFSET);
@@ -1554,8 +1554,6 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 			break;
 		}
 	}
-	enable_irq(prvdata->sysmmu_nonsecure_irq);
-	enable_irq(prvdata->sysmmu_secure_irq);
 	if (!aoc_reset_successful) {
 		/* Trigger acpm ramdump since we timed out the aoc reset request */
 		dbg_snapshot_emergency_reboot("AoC Restart timed out");
@@ -1808,7 +1806,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	if (prvdata->no_ap_resets) {
 		dev_err(dev, "Reset request rejected, option disabled via persist options");
 	} else {
-		disable_irq_nosync(prvdata->watchdog_irq);
+		configure_crash_interrupts(prvdata, false);
 		strlcpy(prvdata->ap_reset_reason, reason_str, AP_RESET_REASON_LENGTH);
 		prvdata->ap_triggered_reset = true;
 		schedule_work(&prvdata->watchdog_work);
@@ -2165,6 +2163,26 @@ static void aoc_clear_sysmmu(struct aoc_prvdata *p)
 #endif
 }
 
+static void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable)
+{
+	if (prvdata->first_fw_load) {
+		/* Default irq state of watchdog is off and sysmmu is on.
+		 * When loading aoc firmware in first time
+		 * Enable only irq of watchdog for balance irq state
+		 */
+		enable_irq(prvdata->watchdog_irq);
+		prvdata->first_fw_load = false;
+	} else if (enable) {
+		enable_irq(prvdata->sysmmu_nonsecure_irq);
+		enable_irq(prvdata->sysmmu_secure_irq);
+		enable_irq(prvdata->watchdog_irq);
+	} else {
+		disable_irq(prvdata->sysmmu_nonsecure_irq);
+		disable_irq(prvdata->sysmmu_secure_irq);
+		disable_irq_nosync(prvdata->watchdog_irq);
+	}
+}
+
 static void aoc_monitor_online(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -2175,8 +2193,7 @@ static void aoc_monitor_online(struct work_struct *work)
 	mutex_lock(&aoc_service_lock);
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
-
-		disable_irq_nosync(prvdata->watchdog_irq);
+		configure_crash_interrupts(prvdata, false);
 		aoc_take_offline(prvdata);
 		restart_rc = aoc_watchdog_restart(prvdata);
 		if (restart_rc)
@@ -2528,7 +2545,7 @@ static irqreturn_t watchdog_int_handler(int irq, void *dev)
 
 	/* AP shouldn't access AoC registers to clear the IRQ. */
 	/* Mask the IRQ until the IRQ gets cleared by AoC reset during SSR. */
-	disable_irq_nosync(irq);
+	configure_crash_interrupts(prvdata, false);
 	schedule_work(&prvdata->watchdog_work);
 
 	return IRQ_HANDLED;
@@ -3270,6 +3287,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		rc = -EIO;
 		goto err_watchdog_irq_req;
 	}
+	prvdata->first_fw_load = true;
 
 	sysmmu_node = of_parse_phandle(aoc_node, "iommus", 0);
 	if (!sysmmu_node) {
@@ -3497,7 +3515,7 @@ static void aoc_platform_shutdown(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(pdev);
 
-	disable_irq_nosync(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, false);
 	aoc_take_offline(prvdata);
 }
 
