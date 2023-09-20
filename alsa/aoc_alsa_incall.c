@@ -239,6 +239,10 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	/* TODO: refactor needed on mapping between device number and entrypoint */
 	alsa_stream->entry_point_idx = (idx == 7) ? HAPTICS : idx;
+	if (rtd->dai_link->id == IDX_INCALL_CAP0_TX &&
+		chip->incall_capture_state[0] == INCALL_CAPTURE_3MIC) {
+		alsa_stream->reused_for_voip = true;
+	}
 	mutex_unlock(&chip->audio_mutex);
 
 	return 0;
@@ -319,6 +323,12 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
    	*/
 	chip->opened &= ~(1 << alsa_stream->idx);
 
+	if (alsa_stream->reused_for_voip) {
+		/* Userspace should only select one EP for VoIP capture and one EP for
+		 * VoIP playback.
+		 */
+		teardown_voipcall(alsa_stream);
+	}
 	mutex_unlock(&chip->audio_mutex);
 
 	return 0;
@@ -421,6 +431,12 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 		alsa_stream->buffer_size, alsa_stream->period_size, alsa_stream->pos,
 		runtime->frame_bits);
 
+	if (alsa_stream->reused_for_voip) {
+		/* Userspace should only select one EP for VoIP capture and one EP for
+		 * VoIP playback.
+		 */
+		prepare_voipcall(alsa_stream);
+	}
 	mutex_unlock(&chip->audio_mutex);
 	return 0;
 }
