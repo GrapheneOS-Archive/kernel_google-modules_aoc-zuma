@@ -305,6 +305,7 @@ struct aoc_chip {
 	int usb_card;
 	int usb_device;
 	int usb_direction;
+	int mel_enable;
 
 	struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG a2dp_encoder_cfg;
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG usb_sink_cfg;
@@ -448,6 +449,9 @@ int aoc_lvm_enable_set(struct aoc_chip *chip, long enable);
 int aoc_decoder_ref_enable_get(struct aoc_chip *chip, long*enable);
 int aoc_decoder_ref_enable_set(struct aoc_chip *chip, long enable);
 
+int aoc_mel_enable(struct aoc_chip *chip, int enable);
+int aoc_mel_rs2_set(struct aoc_chip *chip, long *rs2);
+int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2);
 
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable);
 int aoc_sidetone_cfg_get(struct aoc_chip *chip, int param, long *val);
