@@ -132,7 +132,7 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 	if (!pcu)
 		return -ENODEV;
 
-	if (aoc_module_params->aoc_disable_restart)
+	if (*(aoc_module_params->aoc_disable_restart))
 		return AOC_RESTART_DISABLED_RC;
 
 	aoc_reset_successful = false;
@@ -174,7 +174,7 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 		}
 	}
 
-	if (aoc_req_rc && aoc_module_params->aoc_panic_on_req_timeout) {
+	if (aoc_req_rc && *(aoc_module_params->aoc_panic_on_req_timeout)) {
 		dev_err(prvdata->dev, "timed out too many times waiting for aoc_ack, triggering kernel panic\n");
 		panic("AoC kernel panic: timed out waiting for aoc_ack");
 	}

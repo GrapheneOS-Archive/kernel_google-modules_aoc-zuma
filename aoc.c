@@ -111,7 +111,11 @@ static bool aoc_panic_on_req_timeout = true;
 module_param(aoc_panic_on_req_timeout, bool, 0644);
 MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when aoc_req times out.");
 
-static struct aoc_module_parameters *aoc_module_params;
+static struct aoc_module_parameters aoc_module_params = {
+	.aoc_autoload_firmware = &aoc_autoload_firmware,
+	.aoc_disable_restart = &aoc_disable_restart,
+	.aoc_panic_on_req_timeout = &aoc_panic_on_req_timeout,
+};
 
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
@@ -1860,7 +1864,7 @@ err_coredump:
 
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
-	restart_rc = aoc_watchdog_restart(prvdata, aoc_module_params);
+	restart_rc = aoc_watchdog_restart(prvdata, &aoc_module_params);
 	if (restart_rc == AOC_RESTART_DISABLED_RC) {
 		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
 	} else if (restart_rc) {
@@ -2263,13 +2267,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	int ret;
 	int rc;
 	int i;
-	struct aoc_module_parameters module_params = {
-			.aoc_autoload_firmware = aoc_autoload_firmware,
-			.aoc_disable_restart = aoc_disable_restart,
-			.aoc_panic_on_req_timeout = aoc_panic_on_req_timeout
-	};
-
-	aoc_module_params = &module_params;
 
 	if (aoc_platform_device != NULL) {
 		dev_err(dev,
