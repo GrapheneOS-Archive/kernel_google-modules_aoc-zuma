@@ -136,8 +136,6 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 		return AOC_RESTART_DISABLED_RC;
 
 	aoc_reset_successful = false;
-	disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
-	disable_irq_nosync(prvdata->sysmmu_secure_irq);
 	for (i = 0; i < aoc_reset_tries; i++) {
 		dev_info(prvdata->dev, "asserting aoc_req\n");
 		request_aoc_on(prvdata, true);
@@ -179,8 +177,6 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 		panic("AoC kernel panic: timed out waiting for aoc_ack");
 	}
 
-	enable_irq(prvdata->sysmmu_nonsecure_irq);
-	enable_irq(prvdata->sysmmu_secure_irq);
 	if (!aoc_reset_successful) {
 		/* Trigger acpm ramdump since we timed out the aoc reset request */
 		dbg_snapshot_emergency_reboot("AoC Restart timed out");
@@ -439,6 +435,7 @@ int configure_watchdog_interrupt(struct platform_device *pdev, struct aoc_prvdat
 			ret);
 		return -EIO;
 	}
+	prvdata->first_fw_load = true;
 
 	return ret;
 }
@@ -496,3 +493,24 @@ void aoc_configure_ssmt(struct platform_device *pdev
 {}
 #endif
 EXPORT_SYMBOL_GPL(aoc_configure_ssmt);
+
+void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable)
+{
+	if (prvdata->first_fw_load) {
+		/* Default irq state of watchdog is off and sysmmu is on.
+		 * When loading aoc firmware in first time
+		 * Enable only irq of watchdog for balance irq state
+		 */
+		enable_irq(prvdata->watchdog_irq);
+		prvdata->first_fw_load = false;
+	} else if (enable) {
+		enable_irq(prvdata->sysmmu_nonsecure_irq);
+		enable_irq(prvdata->sysmmu_secure_irq);
+		enable_irq(prvdata->watchdog_irq);
+	} else {
+		disable_irq(prvdata->sysmmu_nonsecure_irq);
+		disable_irq(prvdata->sysmmu_secure_irq);
+		disable_irq_nosync(prvdata->watchdog_irq);
+	}
+}
+EXPORT_SYMBOL_GPL(configure_crash_interrupts);

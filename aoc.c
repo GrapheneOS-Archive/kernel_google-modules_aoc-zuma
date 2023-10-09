@@ -641,7 +641,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		aoc_release_from_reset(prvdata);
 	}
 
-	enable_irq(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, true);
 
 	/* Monitor if there is callback from aoc after 5sec */
 	cancel_delayed_work_sync(&prvdata->monitor_work);
@@ -948,7 +948,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	if (prvdata->no_ap_resets) {
 		dev_err(dev, "Reset request rejected, option disabled via persist options");
 	} else {
-		disable_irq_nosync(prvdata->watchdog_irq);
+		configure_crash_interrupts(prvdata, false);
 		strlcpy(prvdata->ap_reset_reason, reason_str, AP_RESET_REASON_LENGTH);
 		prvdata->ap_triggered_reset = true;
 		schedule_work(&prvdata->watchdog_work);
@@ -2560,7 +2560,7 @@ static void aoc_platform_shutdown(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(pdev);
 
-	disable_irq_nosync(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, false);
 	aoc_take_offline(prvdata);
 }
 
