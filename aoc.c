@@ -2553,6 +2553,7 @@ err_memnode:
 err_chardev:
 err_failed_prvdata_alloc:
 err_invalid_dt:
+	aoc_platform_device = NULL;
 err_platform_not_null:
 	return rc;
 }
