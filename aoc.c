@@ -111,7 +111,11 @@ static bool aoc_panic_on_req_timeout = true;
 module_param(aoc_panic_on_req_timeout, bool, 0644);
 MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when aoc_req times out.");
 
-static struct aoc_module_parameters *aoc_module_params;
+static struct aoc_module_parameters aoc_module_params = {
+	.aoc_autoload_firmware = &aoc_autoload_firmware,
+	.aoc_disable_restart = &aoc_disable_restart,
+	.aoc_panic_on_req_timeout = &aoc_panic_on_req_timeout,
+};
 
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
@@ -303,7 +307,6 @@ static int allocate_mailbox_channels(struct aoc_prvdata *prv)
 			rc = PTR_ERR(slot->channel);
 			dev_err(dev, "failed to find mailbox interface %d : %d\n", i, rc);
 			slot->channel = NULL;
-			rc = -EIO;
 			goto err_mbox_req;
 		}
 	}
@@ -642,7 +645,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		aoc_release_from_reset(prvdata);
 	}
 
-	enable_irq(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, true);
 
 	/* Monitor if there is callback from aoc after 5sec */
 	cancel_delayed_work_sync(&prvdata->monitor_work);
@@ -949,7 +952,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	if (prvdata->no_ap_resets) {
 		dev_err(dev, "Reset request rejected, option disabled via persist options");
 	} else {
-		disable_irq_nosync(prvdata->watchdog_irq);
+		configure_crash_interrupts(prvdata, false);
 		strlcpy(prvdata->ap_reset_reason, reason_str, AP_RESET_REASON_LENGTH);
 		prvdata->ap_triggered_reset = true;
 		schedule_work(&prvdata->watchdog_work);
@@ -1166,6 +1169,8 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 		return NULL;
 
 	dev = kzalloc(sizeof(struct aoc_service_dev), GFP_KERNEL);
+	if (!dev)
+		return NULL;
 	prvdata->services[index] = dev;
 
 	name = aoc_service_name(s);
@@ -1370,7 +1375,10 @@ static void aoc_did_become_online(struct work_struct *work)
 	}
 
 	for (i = 0; i < s; i++) {
-		create_service_device(prvdata, i);
+		if (!create_service_device(prvdata, i)) {
+			dev_err(prvdata->dev, "failed to create service device at index %d\n", i);
+			goto err;
+		}
 	}
 
 	aoc_state = AOC_STATE_ONLINE;
@@ -1860,7 +1868,7 @@ err_coredump:
 
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
-	restart_rc = aoc_watchdog_restart(prvdata, aoc_module_params);
+	restart_rc = aoc_watchdog_restart(prvdata, &aoc_module_params);
 	if (restart_rc == AOC_RESTART_DISABLED_RC) {
 		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
 	} else if (restart_rc) {
@@ -2122,10 +2130,8 @@ static void aoc_cleanup_resources(struct platform_device *pdev)
 
 static void release_gsa_device(void *prv)
 {
-	struct aoc_prvdata *prvdata = prv;
-
-	put_device(prvdata->gsa_dev);
-	prvdata->gsa_dev = NULL;
+	struct device *gsa_device = (struct device *)prv;
+	put_device(gsa_device);
 }
 
 static int find_gsa_device(struct aoc_prvdata *prvdata)
@@ -2149,7 +2155,7 @@ static int find_gsa_device(struct aoc_prvdata *prvdata)
 	}
 	prvdata->gsa_dev = &gsa_pdev->dev;
 	return devm_add_action_or_reset(prvdata->dev, release_gsa_device,
-					prvdata);
+					&gsa_pdev->dev);
 }
 
 static int aoc_core_suspend(struct device *dev)
@@ -2263,13 +2269,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	int ret;
 	int rc;
 	int i;
-	struct aoc_module_parameters module_params = {
-			.aoc_autoload_firmware = aoc_autoload_firmware,
-			.aoc_disable_restart = aoc_disable_restart,
-			.aoc_panic_on_req_timeout = aoc_panic_on_req_timeout
-	};
-
-	aoc_module_params = &module_params;
 
 	if (aoc_platform_device != NULL) {
 		dev_err(dev,
@@ -2520,7 +2519,6 @@ err_mem_resources:
 err_memnode:
 	deinit_chardev(prvdata);
 err_chardev:
-	kfree(prvdata);
 err_failed_prvdata_alloc:
 err_invalid_dt:
 err_platform_not_null:
@@ -2559,7 +2557,7 @@ static void aoc_platform_shutdown(struct platform_device *pdev)
 {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(pdev);
 
-	disable_irq_nosync(prvdata->watchdog_irq);
+	configure_crash_interrupts(prvdata, false);
 	aoc_take_offline(prvdata);
 }
 

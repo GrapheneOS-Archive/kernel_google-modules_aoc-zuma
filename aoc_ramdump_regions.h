@@ -97,7 +97,6 @@ struct aoc_ramdump_header {
 #define RAMDUMP_SECTION_SRAM_OFFSET 0x1000
 
 #define RAMDUMP_SECTION_CRASH_INFO_SIZE 256
-#define RAMDUMP_SECTION_CRASH_INFO_NAME "Crash info"
 
 #endif /* RAMDUMP_REGIONS_H_ */
 
