@@ -120,6 +120,7 @@ struct aoc_prvdata {
 
 	int watchdog_irq;
 	struct work_struct watchdog_work;
+	bool first_fw_load;
 	bool aoc_reset_done;
 	bool ap_triggered_reset;
 	bool force_release_aoc;
@@ -283,6 +284,8 @@ bool aoc_is_valid_dram_address(struct aoc_prvdata *prv, void *addr);
 bool aoc_fw_ready(void);
 
 u32 dt_property(struct device_node *node, const char *key);
+
+void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 
 #define AOC_SERVICE_NAME_LENGTH 32
 
