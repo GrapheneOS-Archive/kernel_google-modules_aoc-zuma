@@ -1775,9 +1775,30 @@ static void aoc_watchdog(struct work_struct *work)
 	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
 	if (ramdump_header->valid && invalid_magic) {
 		dev_err(prvdata->dev,
-			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
-		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
-			sizeof(crash_info));
+			"aoc coredump possibly failed: invalid magic\n");
+		if (crash_info_section) {
+			const char *crash_reason = (const char *)ramdump_header +
+				crash_info_section->offset;
+			/* Check that offset was not corrupted and that we are not reading
+				random bytes */
+			bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
+				prvdata->dram_size && crash_reason[0] != 0;
+
+			if (crash_reason_valid) {
+				snprintf(crash_info, sizeof(crash_info),
+					"AoC watchdog : coredump corrupt [%s]", crash_reason);
+			} else {
+				snprintf(crash_info, sizeof(crash_info),
+					"AoC watchdog : coredump corrupt (incomplete %u:%u)",
+					ramdump_header->breadcrumbs[0],
+					ramdump_header->breadcrumbs[1]);
+			}
+		} else {
+			dev_err(prvdata->dev,
+				"could not find crash info section in aoc coredump header");
+			strscpy(crash_info, "AoC Watchdog : coredump corrupt",
+				sizeof(crash_info));
+		}
 	}
 
 	if (!skip_carveout_map) {
@@ -1804,10 +1825,18 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (ramdump_header->valid && !invalid_magic) {
+
 		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
 			const char *crash_reason = (const char *)ramdump_header +
 				crash_info_section->offset;
-			dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
+								bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
+				prvdata->dram_size && crash_reason[0] != 0;
+
+		if (crash_reason_valid)
+			pr_err(">>> valid!!");
+		else
+			pr_err(">>> invalid!!!");
+		dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
 				crash_reason);
 			strscpy(crash_info, crash_reason, sizeof(crash_info));
 		} else {
