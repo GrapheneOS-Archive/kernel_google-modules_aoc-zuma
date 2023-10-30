@@ -120,6 +120,7 @@ struct aoc_prvdata {
 
 	int watchdog_irq;
 	struct work_struct watchdog_work;
+	bool first_fw_load;
 	bool aoc_reset_done;
 	bool ap_triggered_reset;
 	bool force_release_aoc;
@@ -181,9 +182,9 @@ struct aoc_prvdata {
 };
 
 struct aoc_module_parameters {
-	bool aoc_autoload_firmware;
-	bool aoc_disable_restart;
-	bool aoc_panic_on_req_timeout;
+	bool *aoc_autoload_firmware;
+	bool *aoc_disable_restart;
+	bool *aoc_panic_on_req_timeout;
 };
 
 #define AOC_DEVICE(_d) container_of((_d), struct aoc_service_dev, dev)
@@ -283,6 +284,8 @@ bool aoc_is_valid_dram_address(struct aoc_prvdata *prv, void *addr);
 bool aoc_fw_ready(void);
 
 u32 dt_property(struct device_node *node, const char *key);
+
+void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 
 #define AOC_SERVICE_NAME_LENGTH 32
 

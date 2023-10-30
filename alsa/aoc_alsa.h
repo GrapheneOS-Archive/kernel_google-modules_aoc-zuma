@@ -222,7 +222,8 @@ enum aec_ref_source {
 	BT_PLAYBACK,
 	NUM_AEC_REF_SOURCE
 };
-enum { INCALL_CAPTURE_OFF = 0, INCALL_CAPTURE_UL, INCALL_CAPTURE_DL, INCALL_CAPTURE_UL_DL };
+enum { INCALL_CAPTURE_OFF = 0, INCALL_CAPTURE_UL, INCALL_CAPTURE_DL, INCALL_CAPTURE_UL_DL,
+	INCALL_CAPTURE_3MIC };
 enum { NONBLOCKING = 0, BLOCKING = 1 };
 enum { STOP = 0, START };
 enum { PLAYBACK_MODE, VOICE_TX_MODE, VOICE_RX_MODE, HAPTICS_MODE, OFFLOAD_MODE };
@@ -344,6 +345,7 @@ struct aoc_alsa_stream {
 	int params_rate; /* Sampling rate */
 	int pcm_format_width; /* Number of bits */
 	bool pcm_float_fmt; /* Floating point */
+	bool reused_for_voip;
 
 	struct vm_area_struct *vma; /* for MMAP */
 	unsigned int period_size;

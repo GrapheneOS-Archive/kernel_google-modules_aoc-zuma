@@ -355,12 +355,6 @@ static void usb_host_mode_checking_work(struct work_struct *ws)
 	return;
 }
 
-/*
- * This variable used to present if aoc_usb module was probed done. If offload
- * is enabled, the controller needs to wait for the aoc_usb probe done and then
- * continue the controller's probe.
- */
-static bool aoc_usb_probe_done;
 static int aoc_usb_probe(struct aoc_service_dev *adev)
 {
 	struct device *dev = &adev->dev;
@@ -384,15 +378,11 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 	drvdata->service_timeout = msecs_to_jiffies(100);
 	drvdata->nb.notifier_call = aoc_usb_notify;
 	register_aoc_usb_notifier(&drvdata->nb);
-
 	dev_set_drvdata(dev, drvdata);
-
-	aoc_usb_probe_done = true;
-
 	schedule_work(&usb_host_mode_checking_ws);
 
-	// Clear the fsm_reset flag to resume otg_fsm for host/gadget mode bring up.
-	dwc3_otg_fsm_try_reset(false);
+	/* USB host mode needs support from AoC. */
+	dwc3_otg_host_ready(true);
 
 	return 0;
 }
@@ -401,9 +391,8 @@ static int aoc_usb_remove(struct aoc_service_dev *adev)
 {
 	struct aoc_usb_drvdata *drvdata = dev_get_drvdata(&adev->dev);
 
-	// If gadget mode is engaged, we raise the fsm_reset flag and wait.
-	// Otherwise, we reset otg_fsm directly.
-	dwc3_otg_fsm_try_reset(true);
+	/* USB host mode needs support from AoC. */
+	dwc3_otg_host_ready(false);
 
 	unregister_aoc_usb_notifier(&drvdata->nb);
 	wakeup_source_unregister(drvdata->ws);
@@ -411,14 +400,8 @@ static int aoc_usb_remove(struct aoc_service_dev *adev)
 
 	kfree(drvdata);
 
-	aoc_usb_probe_done = false;
 
 	return 0;
-}
-
-bool is_aoc_usb_probe_done(void)
-{
-	return aoc_usb_probe_done;
 }
 
 static const char *const aoc_usb_service_names[] = {
