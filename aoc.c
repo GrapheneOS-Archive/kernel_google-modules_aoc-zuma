@@ -2746,8 +2746,8 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	u32 section_flags;
-	bool ap_reset = false, invalid_magic;
+	bool ap_reset = false, valid_magic;
+	struct aoc_section_header *crash_info_section;
 
 	prvdata->total_restarts++;
 
@@ -2796,30 +2796,53 @@ static void aoc_watchdog(struct work_struct *work)
 
 	ramdump_timeout = jiffies + (5 * HZ);
 	while (time_before(jiffies, ramdump_timeout)) {
-		if (ramdump_header->valid)
+		valid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC)) == 0;
+		if (ramdump_header->valid == 1 && valid_magic)
 			break;
 		msleep(100);
 	}
 
-	if (!ramdump_header->valid) {
-		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
-		bool crash_reason_valid = (strnlen(crash_reason,
-			sizeof(crash_info)) != 0);
+	crash_info_section = &ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX];
+	if (crash_info_section->type != SECTION_TYPE_CRASH_INFO)
+		crash_info_section = NULL;
 
-		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
-		snprintf(crash_info, sizeof(crash_info),
-			"AoC watchdog : %s (incomplete %u:%u)",
-			crash_reason_valid ? crash_reason : "unknown reason",
-			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+	if (!(ramdump_header->valid == 1) || !valid_magic) {
+		if (!(ramdump_header->valid == 1))
+			dev_info(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+		if (!valid_magic)
+			dev_info(prvdata->dev, "aoc coredump has invalid magic\n");
+
+		if (crash_info_section) {
+			const char *crash_reason = (const char *)ramdump_header +
+				crash_info_section->offset;
+			bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
+				prvdata->dram_size && crash_reason[0] != 0;
+
+			snprintf(crash_info, sizeof(crash_info),
+				"AoC watchdog : %s (incomplete %u:%u)",
+				crash_reason_valid ? crash_reason : "unknown reason",
+				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+		} else {
+			dev_err(prvdata->dev, "could not find crash info section in aoc coredump header");
+			snprintf(crash_info, sizeof(crash_info),
+				"AoC watchdog : unknown reason (incomplete %u:%u)",
+				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+		}
 	}
 
-	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
-	if (ramdump_header->valid && invalid_magic) {
-		dev_err(prvdata->dev,
-			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
-		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
-			sizeof(crash_info));
+	if (ramdump_header->valid == 1 && valid_magic) {
+		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
+			const char *crash_reason = (const char *)ramdump_header +
+				crash_info_section->offset;
+			dev_info(prvdata->dev,
+				"aoc coredump has valid coredump header, crash reason [%s]", crash_reason);
+			strscpy(crash_info, crash_reason, sizeof(crash_info));
+		} else {
+			dev_info(prvdata->dev,
+				"aoc coredump has valid coredump header, but invalid crash reason");
+			strscpy(crash_info, "AoC Watchdog : invalid crash info",
+				sizeof(crash_info));
+		}
 	}
 
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
@@ -2841,22 +2864,6 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_vmap;
 	}
 #endif
-
-	if (ramdump_header->valid && !invalid_magic) {
-		const char *crash_reason = (const char *)ramdump_header +
-			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
-
-		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
-		if (section_flags & RAMDUMP_FLAG_VALID) {
-			dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
-				crash_reason);
-			strscpy(crash_info, crash_reason, sizeof(crash_info));
-		} else {
-			dev_info(prvdata->dev, "aoc coredump has valid coredump header, but invalid crash reason");
-			strscpy(crash_info, "AoC Watchdog : invalid crash info",
-				sizeof(crash_info));
-		}
-	}
 
 	if (ap_reset) {
 		/* Prefer the user specified reason */
