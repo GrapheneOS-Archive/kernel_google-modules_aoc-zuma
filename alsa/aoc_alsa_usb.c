@@ -75,6 +75,8 @@ void usb_audio_offload_connect(struct snd_usb_audio *chip)
 	mutex_lock(&chip->mutex);
 	uadev[card_num].chip = chip;
 	uadev[card_num].card_num = card_num;
+	chip->quirk_flags &= ~QUIRK_FLAG_GENERIC_IMPLICIT_FB;
+	chip->quirk_flags |= QUIRK_FLAG_SKIP_IMPLICIT_FB;
 	mutex_unlock(&chip->mutex);
 }
 
