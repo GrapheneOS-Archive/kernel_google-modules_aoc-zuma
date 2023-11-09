@@ -938,15 +938,13 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 {
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
-	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
 	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
 	}
 
-	strscpy(reason_str, buf, reason_str_len);
-	reason_str[reason_str_len] = '\0';
+	strscpy(reason_str, buf, sizeof(reason_str));
 	dev_err(dev, "Reset requested from userspace, reason: %s", reason_str);
 
 	if (prvdata->no_ap_resets) {
