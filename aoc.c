@@ -1014,6 +1014,14 @@ static ssize_t sensor_power_enable_store(struct device *dev,
 
 static DEVICE_ATTR_WO(sensor_power_enable);
 
+static ssize_t notify_timeout_aoc_status_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	return 0;
+}
+
+static DEVICE_ATTR_RO(notify_timeout_aoc_status);
+
 static struct attribute *aoc_attrs[] = {
 	&dev_attr_firmware.attr,
 	&dev_attr_revision.attr,
@@ -1027,6 +1035,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_sensor_power_enable.attr,
 	&dev_attr_force_reload.attr,
 	&dev_attr_dmic_power_enable.attr,
+	&dev_attr_notify_timeout_aoc_status.attr,
 	NULL
 };
 
@@ -1569,6 +1578,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 			if (prvdata->protected_by_gsa)
 				dev_err(prvdata->dev, "skipping GSA commands");
+			notify_timeout_aoc_status();
 			return;
 		}
 	}
@@ -1633,6 +1643,16 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 	}
 exit:
 	atomic_dec(&prvdata->aoc_process_active);
+}
+
+void notify_timeout_aoc_status(void)
+{
+	if (aoc_platform_device == NULL) {
+		pr_err("AOC platform device is undefined, can't notify aocd\n");
+		return;
+	}
+	sysfs_notify(&aoc_platform_device->dev.kobj, NULL,
+		"notify_timeout_aoc_status");
 }
 
 void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
