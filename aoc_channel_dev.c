@@ -71,6 +71,8 @@ static const char * const channel_service_names[] = {
 	"com.google.usf.non_wake_up",
 	"com.google.chre",
 	"com.google.chre.non_wake_up",
+	"com.google.bt",
+	"com.google.bt.non_wake_up",
 	"usf_sh_mem_doorbell",
 	NULL,
 };
@@ -210,7 +212,8 @@ static int aocc_demux_kthread(void *data)
 				handler_found = 1;
 				if (!node->msg.non_wake_up &&
 				    (strcmp(dev_name(&service->dev),"com.google.usf") == 0 ||
-				     strcmp(dev_name(&service->dev),"com.google.chre") == 0)) {
+				     strcmp(dev_name(&service->dev),"com.google.chre") == 0 ||
+				     strcmp(dev_name(&service->dev),"com.google.bt") == 0)) {
 					take_wake_lock = true;
 				}
 

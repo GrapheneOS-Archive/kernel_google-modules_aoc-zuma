@@ -3095,8 +3095,6 @@ int aoc_audio_set_params(struct aoc_alsa_stream *alsa_stream, uint32_t channels,
 			 uint32_t samplerate, uint32_t bps, bool pcm_float_fmt, int source_mode)
 {
 	int err = 0;
-	struct aoc_chip *chip = alsa_stream->chip;
-
 	pr_debug("setting channels(%u), samplerate(%u), bits-per-sample(%u)\n", channels,
 		 samplerate, bps);
 
@@ -3111,13 +3109,6 @@ int aoc_audio_set_params(struct aoc_alsa_stream *alsa_stream, uint32_t channels,
 		if (err < 0) {
 			pr_err("ERR:%d capture audio param set fails\n", err);
 			goto exit;
-		}
-
-		/* To deal with recording with spatial module enabled */
-		if (chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream)) {
-			err = aoc_audio_capture_spatial_module_trigger(chip, START);
-			if (err < 0)
-				pr_err("ERR:%d mic proc spatial module failed to start!\n", err);
 		}
 	}
 
@@ -3884,7 +3875,6 @@ int aoc_audio_open(struct aoc_alsa_stream *alsa_stream)
 
 int aoc_audio_close(struct aoc_alsa_stream *alsa_stream)
 {
-	int err = 0;
 	struct aoc_chip *chip = alsa_stream->chip;
 	struct snd_pcm_substream *substream = alsa_stream->substream;
 
@@ -3893,14 +3883,6 @@ int aoc_audio_close(struct aoc_alsa_stream *alsa_stream)
 		if (alsa_stream->idx == UC_ULTRASONIC_RECORD)
 			ap_record_stop(chip, alsa_stream);
 		else if (ap_filter_capture_stream(alsa_stream)) {
-			/* Disable spatial module */
-			if (chip->mic_spatial_module_enable && !aoc_pcm_is_mmap_raw(alsa_stream)) {
-				err = aoc_audio_capture_spatial_module_trigger(chip, STOP);
-				if (err < 0)
-					pr_err("ERR:%d mic proc spatial module failed to stop!\n",
-					       err);
-			}
-
 			/* Stop the capturing mic*/
 			if (aoc_audio_capture_active_stream_num(chip) == 0) {
 				pr_info("%s: record stop\n", __func__);
