@@ -938,15 +938,13 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 {
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
-	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
 	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
 	}
 
-	strscpy(reason_str, buf, reason_str_len);
-	reason_str[reason_str_len] = '\0';
+	strscpy(reason_str, buf, sizeof(reason_str));
 	dev_err(dev, "Reset requested from userspace, reason: %s", reason_str);
 
 	if (prvdata->no_ap_resets) {
@@ -1016,6 +1014,14 @@ static ssize_t sensor_power_enable_store(struct device *dev,
 
 static DEVICE_ATTR_WO(sensor_power_enable);
 
+static ssize_t notify_timeout_aoc_status_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	return 0;
+}
+
+static DEVICE_ATTR_RO(notify_timeout_aoc_status);
+
 static struct attribute *aoc_attrs[] = {
 	&dev_attr_firmware.attr,
 	&dev_attr_revision.attr,
@@ -1029,6 +1035,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_sensor_power_enable.attr,
 	&dev_attr_force_reload.attr,
 	&dev_attr_dmic_power_enable.attr,
+	&dev_attr_notify_timeout_aoc_status.attr,
 	NULL
 };
 
@@ -1568,6 +1575,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 			dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
 			if (prvdata->protected_by_gsa)
 				dev_err(prvdata->dev, "skipping GSA commands");
+			notify_timeout_aoc_status();
 			return;
 		}
 	}
@@ -1634,6 +1642,16 @@ exit:
 	atomic_dec(&prvdata->aoc_process_active);
 }
 
+void notify_timeout_aoc_status(void)
+{
+	if (aoc_platform_device == NULL) {
+		pr_err("AOC platform device is undefined, can't notify aocd\n");
+		return;
+	}
+	sysfs_notify(&aoc_platform_device->dev.kobj, NULL,
+		"notify_timeout_aoc_status");
+}
+
 void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
 			 void *ctx)
 {
@@ -1654,21 +1672,6 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev)
 	prvdata->map_handler_ctx = NULL;
 }
 EXPORT_SYMBOL_GPL(aoc_remove_map_handler);
-
-static struct aoc_section_header *find_ramdump_section(struct aoc_ramdump_header
-						*ramdump_header, int section_type)
-{
-	int i;
-
-	if (ramdump_header->num_sections != RAMDUMP_NUM_SECTIONS)
-		return NULL;
-
-	for (i = 0; i < ramdump_header->num_sections; i++)
-		if (ramdump_header->sections[i].type == section_type)
-			return &ramdump_header->sections[i];
-
-	return NULL;
-}
 
 static void aoc_watchdog(struct work_struct *work)
 {
@@ -1693,9 +1696,8 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	bool ap_reset = false, invalid_magic;
-	struct aoc_section_header *crash_info_section =
-		find_ramdump_section(ramdump_header, SECTION_TYPE_CRASH_INFO);
+	bool ap_reset = false, valid_magic;
+	struct aoc_section_header *crash_info_section;
 
 	prvdata->total_restarts++;
 
@@ -1744,18 +1746,27 @@ static void aoc_watchdog(struct work_struct *work)
 
 	ramdump_timeout = jiffies + (5 * HZ);
 	while (time_before(jiffies, ramdump_timeout)) {
-		if (ramdump_header->valid)
+		valid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC)) == 0;
+		if (ramdump_header->valid == 1 && valid_magic)
 			break;
 		msleep(100);
 	}
 
-	if (!ramdump_header->valid) {
-		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+	crash_info_section = &ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX];
+	if (crash_info_section->type != SECTION_TYPE_CRASH_INFO)
+		crash_info_section = NULL;
+
+	if (!(ramdump_header->valid == 1) || !valid_magic) {
+		if (!(ramdump_header->valid == 1))
+			dev_info(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+		if (!valid_magic)
+			dev_info(prvdata->dev, "aoc coredump has invalid magic\n");
+
 		if (crash_info_section) {
 			const char *crash_reason = (const char *)ramdump_header +
 				crash_info_section->offset;
-			bool crash_reason_valid = (strnlen(crash_reason,
-				sizeof(crash_info)) != 0);
+			bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
+				prvdata->dram_size && crash_reason[0] != 0;
 
 			snprintf(crash_info, sizeof(crash_info),
 				"AoC watchdog : %s (incomplete %u:%u)",
@@ -1769,31 +1780,17 @@ static void aoc_watchdog(struct work_struct *work)
 		}
 	}
 
-	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
-	if (ramdump_header->valid && invalid_magic) {
-		dev_err(prvdata->dev,
-			"aoc coredump possibly failed: invalid magic\n");
-		if (crash_info_section) {
+	if (ramdump_header->valid == 1 && valid_magic) {
+		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
 			const char *crash_reason = (const char *)ramdump_header +
 				crash_info_section->offset;
-			/* Check that offset was not corrupted and that we are not reading
-				random bytes */
-			bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
-				prvdata->dram_size && crash_reason[0] != 0;
-
-			if (crash_reason_valid) {
-				snprintf(crash_info, sizeof(crash_info),
-					"AoC watchdog : coredump corrupt [%s]", crash_reason);
-			} else {
-				snprintf(crash_info, sizeof(crash_info),
-					"AoC watchdog : coredump corrupt (incomplete %u:%u)",
-					ramdump_header->breadcrumbs[0],
-					ramdump_header->breadcrumbs[1]);
-			}
+			dev_info(prvdata->dev,
+				"aoc coredump has valid coredump header, crash reason [%s]", crash_reason);
+			strscpy(crash_info, crash_reason, sizeof(crash_info));
 		} else {
-			dev_err(prvdata->dev,
-				"could not find crash info section in aoc coredump header");
-			strscpy(crash_info, "AoC Watchdog : coredump corrupt",
+			dev_info(prvdata->dev,
+				"aoc coredump has valid coredump header, but invalid crash reason");
+			strscpy(crash_info, "AoC Watchdog : invalid crash info",
 				sizeof(crash_info));
 		}
 	}
@@ -1821,27 +1818,6 @@ static void aoc_watchdog(struct work_struct *work)
 		sscd_info.segs[0].addr = prvdata->dram_virt;
 	}
 
-	if (ramdump_header->valid && !invalid_magic) {
-
-		if (crash_info_section && crash_info_section->flags & RAMDUMP_FLAG_VALID) {
-			const char *crash_reason = (const char *)ramdump_header +
-				crash_info_section->offset;
-								bool crash_reason_valid = crash_reason < (char *)prvdata->dram_virt +
-				prvdata->dram_size && crash_reason[0] != 0;
-
-		if (crash_reason_valid)
-			pr_err(">>> valid!!");
-		else
-			pr_err(">>> invalid!!!");
-		dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
-				crash_reason);
-			strscpy(crash_info, crash_reason, sizeof(crash_info));
-		} else {
-			dev_info(prvdata->dev, "aoc coredump has valid coredump header, but invalid crash reason");
-			strscpy(crash_info, "AoC Watchdog : invalid crash info",
-				sizeof(crash_info));
-		}
-	}
 
 	if (ap_reset) {
 		/* Prefer the user specified reason */
