@@ -287,6 +287,8 @@ u32 dt_property(struct device_node *node, const char *key);
 
 void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 
+void notify_timeout_aoc_status(void);
+
 #define AOC_SERVICE_NAME_LENGTH 32
 
 /* Rings should have the ring flag set, slots = 1, size = ring size
