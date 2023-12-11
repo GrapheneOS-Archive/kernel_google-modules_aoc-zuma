@@ -142,6 +142,7 @@ struct aoc_prvdata {
 	u32 force_voltage_nominal;
 	u32 no_ap_resets;
 	u32 force_speaker_ultrasonic;
+	u32 volte_release_mif;
 
 	u32 total_coredumps;
 	u32 total_restarts;
@@ -339,6 +340,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCChipRevision = 0x1012,
 	kAOCChipType =  0x1013,
 	kAOCGnssType =  0x1014,
+	kAOCVolteReleaseMif = 0x1015,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \
