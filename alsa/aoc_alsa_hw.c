@@ -423,6 +423,10 @@ int aoc_audio_capture_mic_prepare(struct aoc_chip *chip)
 		goto exit;
 	}
 
+	/* Update mask before start capture */
+	if (mic_input_source == AP_INPUT_PROCESSOR_MIC_INPUT_INDEX)
+		aoc_audio_mic_mask_set(chip, false);
+
 	// CMD_AUDIO_INPUT_AP_INPUT_START_ID with mic_input_source
 	pr_info("mic_input_source = %d\n", mic_input_source);
 
@@ -3265,6 +3269,12 @@ static int aoc_telephony_mic_open(struct aoc_chip *chip, int mic)
 	}
 
 	mic_input_source = hw_id_to_phone_mic_source(mic);
+
+	/* Update mask before start capture */
+	if (mic_input_source == MODEM_MIC_INPUT_INDEX ||
+		mic_input_source == MODEM_INCALL_INPUT_INDEX)
+		aoc_audio_mic_mask_set(chip, true);
+
 	pr_info("open telephony mic: %d - %d\n", mic_input_source, mic);
 	if (mic_input_source != NULL_PATH) {
 		err = aoc_audio_modem_mic_input(chip, START, mic_input_source);
@@ -4020,4 +4030,21 @@ int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout)
 		pr_err("WARN: setting CHRE AEC gain is not supported\n");
 		return 0;
 	}
+}
+
+/* Update PDM mic mask */
+int aoc_audio_mic_mask_set(struct aoc_chip *chip, bool is_voice)
+{
+	uint32_t value = UINT_MAX;
+	uint8_t *mask = (uint8_t *)(&value);
+	int key = is_voice, i;
+	const int cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
+	const int block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	const int component = ASP_ID_NONE;
+	const int total_lists = min(NUM_OF_BUILTIN_MIC, (int)sizeof(uint32_t));
+
+	for (i = 0; i < total_lists; i++)
+		mask[i] = chip->buildin_mic_id_list[i];
+
+	return aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
 }

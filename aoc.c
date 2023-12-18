@@ -481,6 +481,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 disable_mm = prvdata->disable_monitor_mode;
 	u32 enable_uart = prvdata->enable_uart_tx;
 	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
+	u32 volte_release_mif = prvdata->volte_release_mif;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	u32 rand_seed = get_random_u32();
@@ -514,7 +515,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCRandSeed, .value = rand_seed },
 		{ .key = kAOCChipRevision, .value = chip_revision },
 		{ .key = kAOCChipType, .value = chip_type },
-		{ .key = kAOCGnssType, .value = gnss_type }
+		{ .key = kAOCGnssType, .value = gnss_type },
+		{ .key = kAOCVolteReleaseMif, .value = volte_release_mif }
 	};
 
 	const char *version;
@@ -2004,6 +2006,23 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		prvdata->force_speaker_ultrasonic = force_sprk_ultrasonic;
 		if (prvdata->force_speaker_ultrasonic != 0)
 			pr_info("AoC Forcefully enabling Speaker Ultrasonic pipeline\n");
+
+		ret = 0;
+	}
+	break;
+
+	case AOC_IOCTL_VOLTE_RELEASE_MIF:
+	{
+		u32 volte_release_mif;
+
+		BUILD_BUG_ON(sizeof(volte_release_mif) != _IOC_SIZE(AOC_IOCTL_VOLTE_RELEASE_MIF));
+
+		if (copy_from_user(&volte_release_mif, (u32 *)arg, _IOC_SIZE(cmd)))
+			break;
+
+		prvdata->volte_release_mif = volte_release_mif;
+		if (prvdata->volte_release_mif != 0)
+			pr_info("AoC setting release Mif on Volte\n");
 
 		ret = 0;
 	}
