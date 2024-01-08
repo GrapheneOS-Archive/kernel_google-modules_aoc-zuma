@@ -1924,6 +1924,9 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 	case AOC_IOCTL_ION_FD_TO_HANDLE:
 	{
 		ret = aoc_unlocked_ioctl_handle_ion_fd(cmd, arg);
+		if (ret == -EINVAL) {
+			pr_err("invalid argument\n");
+		}
 	}
 	break;
 
