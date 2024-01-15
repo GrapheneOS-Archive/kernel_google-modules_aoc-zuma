@@ -1820,7 +1820,6 @@ static void aoc_watchdog(struct work_struct *work)
 		sscd_info.segs[0].addr = prvdata->dram_virt;
 	}
 
-
 	if (ap_reset) {
 		/* Prefer the user specified reason */
 		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
