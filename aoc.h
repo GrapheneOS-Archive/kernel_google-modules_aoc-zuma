@@ -291,6 +291,8 @@ void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 
 void notify_timeout_aoc_status(void);
 
+void trigger_aoc_ssr(bool ap_triggered_reset, char* reset_reason);
+
 #define AOC_SERVICE_NAME_LENGTH 32
 
 /* Rings should have the ring flag set, slots = 1, size = ring size
