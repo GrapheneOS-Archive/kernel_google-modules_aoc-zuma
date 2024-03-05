@@ -1665,7 +1665,6 @@ EXPORT_SYMBOL_GPL(aoc_remove_map_handler);
 void trigger_aoc_ssr(bool ap_triggered_reset, char *reset_reason) {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(aoc_platform_device);
 	if (!mutex_trylock(&aoc_service_lock)) {
-		dev_info(prvdata->dev, "AOC SSR: could not acquire mutex\n");
 		return;
 	} else {
 		bool aoc_in_ssr = aoc_state == AOC_STATE_SSR;
